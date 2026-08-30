@@ -32,4 +32,23 @@
     <ProjectReference Include="..\XPXel.UI\XPXel.UI.csproj" />
   </ItemGroup>
 
+  <!--
+    Native debug symbols must not ship in a release.
+
+    SkiaSharp and HarfBuzzSharp publish libSkiaSharp.pdb / libHarfBuzzSharp.pdb alongside
+    their native binaries. They are copied by the NuGet runtime-asset machinery, so neither
+    <DebugType>none</DebugType> nor AllowedReferenceRelatedFileExtensions removes them, and
+    together they are roughly 100 MB - twice the size of the application itself.
+
+    This runs after the publish file list is computed and drops every .pdb from it. Do not
+    reorder it before ComputeResolvedFilesToPublishList; the items do not exist until then.
+  -->
+  <Target Name="XpxelRemoveNativeSymbolsFromPublish"
+          AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
 </Project>

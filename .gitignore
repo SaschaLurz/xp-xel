@@ -76,8 +76,13 @@ nunit-*.xml
 *.userprefs
 *.sln.docstates
 
+# Machine-generated launch profiles. Visual Studio writes these on first debug and bakes
+# in a random localhost port, so they differ per machine and are pure noise in review.
+**/Properties/launchSettings.json
+
 # Publish output (desktop RID publishes and the WebAssembly bundle)
 publish/
+release/
 [Pp]ublish/
 *.publishsettings
 *.pubxml.user
