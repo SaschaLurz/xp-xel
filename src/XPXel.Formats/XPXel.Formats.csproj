@@ -1,0 +1,23 @@
+<!--
+  XPXel.Formats - image import/export and native project (.xpxel) serialization.
+
+  ARCHITECTURAL RULE: BCL + XPXel.Core only. No UI, and deliberately NO native imaging
+  library (see Png/PngCodec.cs for why the PNG implementation is pure managed code).
+
+  This is the project that grows every time XP-xel learns a new file type. The growth
+  mechanism is ImageFormatRegistry: a new format is a new class plus one registration,
+  never a change to existing code.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XPXel.Formats</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPXel.Core\XPXel.Core.csproj" />
+  </ItemGroup>
+
+</Project>

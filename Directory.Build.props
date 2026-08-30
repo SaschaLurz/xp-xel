@@ -1,0 +1,79 @@
+<!--
+  ===================================================================================
+  XP-xel — Directory.Build.props
+
+  Purpose:
+    MSBuild imports this file automatically into EVERY project in the repository,
+    *before* the project's own properties. It is the single place where solution-wide
+    build settings live, so individual .csproj files stay small and declare only what
+    is genuinely unique to them (target framework quirks, package references, etc.).
+
+  For future sessions:
+    - Because this is imported BEFORE the .csproj body, any property here can be
+      overridden by an individual project simply by re-declaring it.
+    - Central Package Management is enabled: package VERSIONS live in
+      Directory.Packages.props, and .csproj files reference packages WITHOUT a Version
+      attribute. Add new packages' versions there, never inline.
+    - Warnings are errors. That is deliberate: it keeps the codebase clean as it grows.
+      If a specific warning is genuinely acceptable, add it to <NoWarn> with a comment
+      explaining why rather than turning the whole mechanism off.
+  ===================================================================================
+-->
+<Project>
+
+  <!-- ================================================================================
+       Language and compilation
+       ================================================================================ -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Deterministic, reproducible output across machines and CI. -->
+    <Deterministic>true</Deterministic>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+
+  <!-- ================================================================================
+       Warnings
+
+       CS1591 (missing XML comment) is enabled only for the library projects via
+       GenerateDocumentationFile below; heads and tests opt out in their own csproj.
+       ================================================================================ -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors></WarningsNotAsErrors>
+    <NoWarn>$(NoWarn)</NoWarn>
+  </PropertyGroup>
+
+  <!-- ================================================================================
+       Product identity — surfaced in assembly metadata and the About dialog.
+       Bump <Version> for releases; it flows into all assemblies automatically.
+       ================================================================================ -->
+  <PropertyGroup>
+    <Product>XP-xel</Product>
+    <Company>XP-xel</Company>
+    <Authors>XP-xel contributors</Authors>
+    <Copyright>Copyright (c) $([System.DateTime]::Now.Year) XP-xel contributors</Copyright>
+    <Description>A free and open source pixel art creator and editor studio.</Description>
+    <PackageProjectUrl>https://github.com/SaschaLurz/xp-xel</PackageProjectUrl>
+
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <!-- ================================================================================
+       Output layout
+
+       UseArtifactsOutput is the .NET SDK's official centralised output feature: every
+       project's bin/ and obj/ land under <repo>/artifacts/ instead of being scattered
+       through the source tree. Keeps .gitignore trivial and makes a full clean a single
+       directory delete.
+       ================================================================================ -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+</Project>

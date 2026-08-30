@@ -1,0 +1,64 @@
+<!--
+  ===================================================================================
+  XP-xel — Central Package Management
+
+  Purpose:
+    Every NuGet package version used anywhere in the solution is declared exactly once,
+    here. Individual .csproj files write <PackageReference Include="X" /> with NO
+    Version attribute, and MSBuild resolves the version from this file.
+
+  Why:
+    With multiple projects and platform heads (desktop, browser, later mobile), version
+    drift between projects is the classic source of "works on my head, breaks on yours"
+    bugs. Central Package Management makes drift impossible.
+
+  For future sessions:
+    - Adding a package = add a <PackageVersion> line here + a <PackageReference> in the
+      consuming project.
+    - $(AvaloniaVersion) keeps every Avalonia package in lockstep. Avalonia packages
+      MUST all be the same version or you get runtime type-load failures.
+  ===================================================================================
+-->
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+
+    <!-- Single source of truth for the Avalonia version. Bump here to upgrade the UI stack. -->
+    <AvaloniaVersion>12.1.1</AvaloniaVersion>
+  </PropertyGroup>
+
+  <!-- ================================================================================
+       UI stack (Avalonia)
+       ================================================================================ -->
+  <ItemGroup>
+    <PackageVersion Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Browser" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+    <PackageVersion Include="Avalonia.Controls.ColorPicker" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+
+  <!-- ================================================================================
+       Application infrastructure
+       ================================================================================ -->
+  <ItemGroup>
+    <!-- Source-generated MVVM (ObservableProperty / RelayCommand). Chosen over ReactiveUI
+         because it uses no runtime reflection, which keeps WebAssembly and future
+         NativeAOT publishing viable. -->
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
+  </ItemGroup>
+
+  <!-- ================================================================================
+       Testing
+       ================================================================================ -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+</Project>

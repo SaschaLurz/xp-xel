@@ -1,0 +1,25 @@
+<!--
+  XPXel.Core - the platform-independent domain model.
+
+  ARCHITECTURAL RULE: this project must NEVER reference a UI framework, a rendering
+  library, or any other project in the solution. Its only dependency is the BCL.
+  Everything about *what a pixel art document is* lives here: buffers, layers, frames,
+  cels, compositing, tools and undo history.
+
+  Why the rule matters: it keeps the entire editing model unit-testable without a UI, and
+  lets future consumers (a CLI batch exporter, a build-pipeline plugin, a server-side
+  renderer) reuse the model untouched.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XPXel.Core</RootNamespace>
+
+    <!-- Public API is documented; CS1591 (missing XML comment) therefore becomes a build
+         error via TreatWarningsAsErrors. Intentional: Core is the API that every other
+         project and every future contributor codes against. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

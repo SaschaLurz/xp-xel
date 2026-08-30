@@ -1,0 +1,29 @@
+<!--
+  Unit tests for XPXel.Formats: codec round-trips and .xpxel project serialization,
+  including backward compatibility with older project schema versions.
+
+  xUnit v3 test projects are console applications (OutputType=Exe). That is by design in
+  v3, not a mistake.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>XPXel.Formats.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\XPXel.Formats\XPXel.Formats.csproj" />
+  </ItemGroup>
+
+</Project>

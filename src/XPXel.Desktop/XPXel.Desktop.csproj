@@ -1,0 +1,33 @@
+<!--
+  XPXel.Desktop - the Windows / Linux / macOS platform head.
+
+  One project covers all three desktop operating systems: Avalonia's UsePlatformDetect()
+  selects the Win32, X11 or macOS backend at runtime. To ship a given OS you change only
+  the publish RuntimeIdentifier (win-x64, linux-x64, osx-arm64, ...), never the code.
+
+  This project should stay tiny. Everything real lives in XPXel.UI.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XPXel.Desktop</RootNamespace>
+    <AssemblyName>XPXel</AssemblyName>
+
+    <!-- WinExe suppresses the console window on Windows and is ignored on Linux/macOS. -->
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPXel.UI\XPXel.UI.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,8 @@
+{
+  "//": "Pins the .NET SDK for every contributor and CI runner so builds are reproducible. rollForward=latestFeature allows newer 10.0.4xx patch/feature bands but never a different major version.",
+  "sdk": {
+    "version": "10.0.400",
+    "rollForward": "latestFeature",
+    "allowPrerelease": false
+  }
+}

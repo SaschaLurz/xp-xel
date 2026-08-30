@@ -1,0 +1,43 @@
+<!--
+  XPXel.UI - the Avalonia application: views, view models, the pixel canvas control,
+  theming and platform-service abstractions.
+
+  This is a class LIBRARY, not an executable. Each platform head (XPXel.Desktop,
+  XPXel.Browser, later XPXel.Mobile) is a thin project that references this one and does
+  nothing but start Avalonia and register its platform-specific service implementations.
+  That is what makes "ship on another platform" a ~30-line project rather than a port.
+
+  Anything platform-specific MUST be expressed here as an interface (see Services/) and
+  implemented in the head. There should be no #if directives in this project.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XPXel.UI</RootNamespace>
+
+    <!-- Compiled bindings are validated at build time and need no runtime reflection,
+         which keeps WebAssembly and future NativeAOT publishing viable. -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!-- XML docs are not enforced here: Avalonia generates partial classes from .axaml
+         whose members we do not author. Hand-written code is still expected to carry
+         explanatory comments. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.Controls.ColorPicker" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPXel.Core\XPXel.Core.csproj" />
+    <ProjectReference Include="..\XPXel.Formats\XPXel.Formats.csproj" />
+  </ItemGroup>
+
+</Project>

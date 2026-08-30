@@ -55,3 +55,54 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# ---------------------------------------------------------------------------------------
+# XP-xel additions
+#
+# The block above is the standard Dotnet.gitignore. Everything below is specific to how
+# this repository is laid out and to the editors the team uses. Keep new entries here so
+# the upstream block stays easy to refresh from github/gitignore.
+# ---------------------------------------------------------------------------------------
+
+# IDE / editor state
+.vs/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+
+# Publish output (desktop RID publishes and the WebAssembly bundle)
+publish/
+[Pp]ublish/
+*.publishsettings
+*.pubxml.user
+
+# Test / coverage results
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.trx
+TestResults/
+
+# Machine-local MSBuild overrides - never committed, always personal
+*.local.props
+*.local.targets
+Directory.Build.local.props
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Scratch files produced while working on the project
+*.tmp
+*.bak
+
+# AI session / prompt context scaffolding - local working notes, not project source
+initial-prompt-context-info.txt
