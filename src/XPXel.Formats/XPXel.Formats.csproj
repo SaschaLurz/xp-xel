@@ -20,4 +20,11 @@
     <ProjectReference Include="..\XPXel.Core\XPXel.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The codecs are internal because nothing outside this project should depend on their
+         shape. The tests need them: verifying the PNG decoder means constructing files with
+         colour types and bit depths the encoder never writes. -->
+    <InternalsVisibleTo Include="XPXel.Formats.Tests" />
+  </ItemGroup>
+
 </Project>

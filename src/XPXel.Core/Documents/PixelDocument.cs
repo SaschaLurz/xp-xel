@@ -270,6 +270,43 @@ public sealed class PixelDocument : ObservableModel
         return Cels.GetOrCreate(layer.Id, frame.Id, Size);
     }
 
+    /// <summary>
+    /// Replaces the entire timeline, preserving the given frames' identities.
+    /// </summary>
+    /// <param name="frames">The frames to install, in playback order.</param>
+    /// <exception cref="ArgumentException">The sequence is empty.</exception>
+    /// <remarks>
+    /// This exists for deserialization. A loaded document's frames must keep the identities
+    /// recorded in the file, because those identities are half of every cel's key — a
+    /// freshly generated one would orphan all the artwork. Ordinary editing should use
+    /// <see cref="CreateFrame"/> and <see cref="RemoveFrame"/>.
+    /// </remarks>
+    public void ReplaceFrames(IEnumerable<Frame> frames)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+
+        List<Frame> replacement = [.. frames];
+        if (replacement.Count == 0)
+        {
+            throw new ArgumentException("A document must have at least one frame.", nameof(frames));
+        }
+
+        foreach (Frame existing in _frames)
+        {
+            existing.PropertyChanged -= OnContentPropertyChanged;
+        }
+
+        _frames.Clear();
+
+        foreach (Frame frame in replacement)
+        {
+            frame.PropertyChanged += OnContentPropertyChanged;
+            _frames.Add(frame);
+        }
+
+        NotifyStructureChanged();
+    }
+
     /// <summary>Appends a new empty frame to the timeline.</summary>
     /// <param name="index">The position to insert at, or -1 to append.</param>
     /// <returns>The newly created frame.</returns>
