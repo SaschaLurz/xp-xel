@@ -263,3 +263,8 @@ generated_code = true
 [tests/**/*.cs]
 dotnet_diagnostic.CS1591.severity = none
 dotnet_naming_rule.types_and_members_are_pascal_case.severity = none
+
+# CA1859 asks callers to use the most derived type for performance. Tests deliberately go
+# through interfaces to prove the abstraction behaves correctly, and the performance
+# argument is irrelevant in a test run.
+dotnet_diagnostic.CA1859.severity = none
