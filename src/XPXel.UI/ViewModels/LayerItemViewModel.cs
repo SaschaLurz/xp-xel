@@ -1,7 +1,12 @@
 using System.ComponentModel;
+using Avalonia.Media;
+using CommunityToolkit.Mvvm.Input;
+using Avalonia.Media.Imaging;
 using XPXel.Core.Documents;
 using XPXel.Core.History;
 using XPXel.Core.Imaging;
+using XPXel.Core.Primitives;
+using XPXel.UI.Rendering;
 
 namespace XPXel.UI.ViewModels;
 
@@ -24,9 +29,12 @@ namespace XPXel.UI.ViewModels;
 /// here as the next step rather than faked.
 /// </para>
 /// </remarks>
-public sealed class LayerItemViewModel : ViewModelBase, IDisposable
+public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
 {
     private readonly DocumentHistory _history;
+    private WriteableBitmap? _thumbnail;
+    private bool _isEditingName;
+    private LayerDropPosition _dropPosition;
 
     /// <summary>Initialises the row.</summary>
     /// <param name="layer">The layer to present.</param>
@@ -109,6 +117,127 @@ public sealed class LayerItemViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// The layer's organisational label colour, or <see langword="null"/> for none.
+    /// Changing it is recorded in the undo history, as renaming is.
+    /// </summary>
+    public PixelColor? TagColor
+    {
+        get => Layer.TagColor;
+        set
+        {
+            if (value == Layer.TagColor)
+            {
+                return;
+            }
+
+            _history.Execute(new ChangeLayerPropertyCommand<PixelColor?>(
+                "Change Layer Colour", Layer, colour => Layer.TagColor = colour, Layer.TagColor, value));
+        }
+    }
+
+    /// <summary>The label colour as a brush, or a transparent brush when the layer has none.</summary>
+    public IBrush TagBrush => Layer.TagColor is { } colour
+        ? new SolidColorBrush(Color.FromArgb(colour.A, colour.R, colour.G, colour.B))
+        : Brushes.Transparent;
+
+    /// <summary>Gets a value indicating whether the row should show its colour strip.</summary>
+    public bool HasTagColor => Layer.TagColor is not null;
+
+    /// <summary>
+    /// Whether the row is currently showing an editable text box for its name.
+    /// </summary>
+    /// <remarks>
+    /// Renaming is modal at the row level rather than always-editable, because a permanently
+    /// live text box swallows the single-click that selects the layer and makes the list
+    /// awkward to navigate. The view switches between a label and a text box on this flag,
+    /// which is set by a double-click and cleared on Enter, Escape or loss of focus.
+    /// </remarks>
+    public bool IsEditingName
+    {
+        get => _isEditingName;
+        set => SetProperty(ref _isEditingName, value);
+    }
+
+    /// <summary>
+    /// A small preview of what this layer contains, or <see langword="null"/> before the
+    /// first render.
+    /// </summary>
+    public WriteableBitmap? Thumbnail
+    {
+        get => _thumbnail;
+        private set => SetProperty(ref _thumbnail, value);
+    }
+
+    /// <summary>Re-renders <see cref="Thumbnail"/> from the document's current pixels.</summary>
+    /// <param name="document">The document that owns this layer's cels.</param>
+    /// <param name="frame">The frame to preview.</param>
+    /// <remarks>
+    /// Callers are expected to throttle: rendering costs time proportional to the canvas,
+    /// so driving this straight from the document's change event would rebuild every preview
+    /// on every pointer move during a stroke. <c>LayersViewModel</c> owns that throttle.
+    /// </remarks>
+    public void RefreshThumbnail(PixelDocument document, Frame frame)
+    {
+        WriteableBitmap? rendered = LayerThumbnailRenderer.Render(document, Layer, frame);
+
+        // The old bitmap is not disposed: it may still be attached to a visual that has not
+        // yet re-bound, and disposing an in-use WriteableBitmap crashes the renderer. These
+        // are at most a few kilobytes each and are collected normally.
+        Thumbnail = rendered;
+    }
+
+    /// <summary>
+    /// Where a layer being dragged would land relative to this row, used to draw the
+    /// insertion line. <see cref="LayerDropPosition.None"/> while nothing is being dragged
+    /// over it.
+    /// </summary>
+    public LayerDropPosition DropPosition
+    {
+        get => _dropPosition;
+        set
+        {
+            if (SetProperty(ref _dropPosition, value))
+            {
+                OnPropertyChanged(nameof(IsDropTargetAbove));
+                OnPropertyChanged(nameof(IsDropTargetBelow));
+            }
+        }
+    }
+
+    /// <summary>Gets a value indicating whether the insertion line sits above this row.</summary>
+    public bool IsDropTargetAbove => DropPosition == LayerDropPosition.Above;
+
+    /// <summary>Gets a value indicating whether the insertion line sits below this row.</summary>
+    public bool IsDropTargetBelow => DropPosition == LayerDropPosition.Below;
+
+    /// <summary>
+    /// Applies a label colour given as hexadecimal, or clears it when the text is empty.
+    /// </summary>
+    /// <param name="hex">A colour such as <c>#E4572E</c>, or <see langword="null"/>/empty.</param>
+    /// <remarks>
+    /// The parameter is text rather than a colour so the swatches can be declared directly
+    /// in XAML without a converter or a per-swatch view model.
+    /// </remarks>
+    [RelayCommand]
+    private void SetTagColor(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex))
+        {
+            TagColor = null;
+            return;
+        }
+
+        if (PixelColor.TryParseHex(hex, out PixelColor colour))
+        {
+            TagColor = colour;
+        }
+    }
+
+    /// <summary>Puts the row into rename mode.</summary>
+    [RelayCommand]
+    private void BeginRename() => IsEditingName = true;
+
     /// <inheritdoc />
     public void Dispose() => Layer.PropertyChanged -= OnLayerPropertyChanged;
 
@@ -121,6 +250,12 @@ public sealed class LayerItemViewModel : ViewModelBase, IDisposable
             nameof(LayerNode.Opacity) => nameof(OpacityPercent),
             _ => e.PropertyName,
         });
+
+        if (e.PropertyName == nameof(LayerNode.TagColor))
+        {
+            OnPropertyChanged(nameof(TagBrush));
+            OnPropertyChanged(nameof(HasTagColor));
+        }
 
         // The canvas is not told to redraw here: PixelDocument already forwards every
         // layer's property changes as a document-level Properties change, and raising it a

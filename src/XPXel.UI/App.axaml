@@ -4,16 +4,61 @@
   RequestedThemeVariant is Default, which means "resolve from the operating system".
   IThemeService overrides it when the artist picks light or dark explicitly, and sets it
   back to Default for "follow the system".
+
+  The DataTemplates below are declared here, at application scope, rather than on MainView.
+  A panel that has been dragged out into its own floating window lives in a different
+  top-level window and would never see templates declared on the shell — it would render as
+  the view model's type name instead of as a panel.
 -->
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dockThemes="using:Dock.Avalonia.Themes.Fluent"
+             xmlns:docking="using:XPXel.UI.Docking"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:views="using:XPXel.UI.Views"
+             xmlns:vm="using:XPXel.UI.ViewModels"
              x:Class="XPXel.UI.App"
              RequestedThemeVariant="Default">
 
   <Application.Styles>
     <FluentTheme />
+    <dockThemes:DockFluentTheme />
     <StyleInclude Source="avares://XPXel.UI/Themes/Controls.axaml" />
   </Application.Styles>
+
+  <Application.DataTemplates>
+
+    <!-- A docked panel renders whatever view model it carries, which is what lets the
+         templates below be keyed on the panels themselves rather than on docking types. -->
+    <DataTemplate DataType="docking:PanelTool">
+      <ContentControl Content="{Binding Content}" />
+    </DataTemplate>
+
+    <DataTemplate DataType="docking:EditorDocument">
+      <views:EditorDocumentView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:ToolboxViewModel">
+      <views:ToolboxView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:LayersViewModel">
+      <views:LayersView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:PaletteViewModel">
+      <views:ColorPanelView />
+    </DataTemplate>
+
+    <DataTemplate DataType="dialogs:ConfirmDialogViewModel">
+      <views:ConfirmDialogView />
+    </DataTemplate>
+
+    <DataTemplate DataType="dialogs:NewDocumentDialogViewModel">
+      <views:NewDocumentDialogView />
+    </DataTemplate>
+
+  </Application.DataTemplates>
 
   <Application.Resources>
     <ResourceDictionary>

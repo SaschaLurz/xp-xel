@@ -102,10 +102,33 @@ public sealed class PixelCanvasControl : Control, IDisposable
     private PixelDocument? _observedDocument;
     private CanvasViewTransform _transform = CanvasViewTransform.Identity;
     private ImageBrush? _checkerboardBrush;
-    private bool _hasFittedView;
+    /// <summary>
+    /// Whether the artist has zoomed or panned this canvas themselves.
+    /// </summary>
+    /// <remarks>
+    /// Until they have, the view keeps re-fitting whenever the viewport changes size, so
+    /// the artwork stays centred while the window is resized or a panel is dragged wider.
+    /// The first deliberate zoom or pan ends that: continuing to re-fit afterwards would
+    /// throw away the position the artist chose, which is far worse than an off-centre
+    /// canvas. Docking made this necessary — a canvas is now arranged several times at
+    /// growing sizes while the layout settles, and fitting only to the first of those left
+    /// the artwork parked in a corner.
+    /// </remarks>
+    private bool _hasUserAdjustedView;
 
     private ToolPointerButton _activeButton = ToolPointerButton.None;
     private bool _isPanning;
+
+    /// <summary>
+    /// Whether holding space has put the canvas into pan mode, so that the left button
+    /// grabs the image instead of drawing on it.
+    /// </summary>
+    /// <remarks>
+    /// Space is the convention in every pixel and image editor — Photoshop, Aseprite,
+    /// Krita, Figma — because it lets an artist reposition the canvas without giving up the
+    /// tool they are holding. Middle-button panning stays available for mice that have one.
+    /// </remarks>
+    private bool _isSpacePanArmed;
     private Point _panOrigin;
     private Vector _panStartOffset;
     private ImagePoint? _hoveredPixel;
@@ -205,6 +228,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
                 return;
             }
 
+            _hasUserAdjustedView = true;
             ApplyTransform(_transform.ZoomTo(clamped, ViewportCenter));
         }
     }
@@ -223,7 +247,11 @@ public sealed class PixelCanvasControl : Control, IDisposable
     public void ZoomOut() => ZoomStep(zoomIn: false, ViewportCenter);
 
     /// <summary>Resets the view to 1:1 and centres the document.</summary>
-    public void ZoomToActualSize() => CenterDocument(1.0);
+    public void ZoomToActualSize()
+    {
+        _hasUserAdjustedView = true;
+        CenterDocument(1.0);
+    }
 
     /// <summary>Zooms so the whole document is visible and centres it.</summary>
     public void ZoomToFit()
@@ -296,26 +324,29 @@ public sealed class PixelCanvasControl : Control, IDisposable
         Size arranged = base.ArrangeOverride(finalSize);
         _viewport = finalSize;
 
-        // Fit the document the first time the control is given a real size, so a newly
-        // opened document appears centred and fully visible without the artist doing
-        // anything.
-        TryFitOnce();
+        // Keep the document fitted and centred until the artist takes over the view.
+        TryFitToViewport();
 
         return arranged;
     }
 
     /// <summary>
-    /// Fits the document once, as soon as both a document and a real viewport size exist.
-    /// Which of those two arrives first depends on binding order, so both paths call this.
+    /// Fits the document to the viewport, as long as a document and a real size both exist
+    /// and the artist has not yet taken control of the view.
     /// </summary>
-    private void TryFitOnce()
+    /// <remarks>
+    /// Which of the document and the size arrives first depends on binding order, so every
+    /// path that could supply either calls this.
+    /// </remarks>
+    private void TryFitToViewport()
     {
-        if (_hasFittedView || Workspace is null || _viewport is not { Width: > 0, Height: > 0 })
+        if (_hasUserAdjustedView || Workspace is null || _viewport is not { Width: > 0, Height: > 0 })
         {
             return;
         }
 
-        _hasFittedView = true;
+        // ZoomToFit is what actually moves the view, and it must not be taken as the artist
+        // adjusting it, so the flag is left alone here.
         ZoomToFit();
     }
 
@@ -349,6 +380,103 @@ public sealed class PixelCanvasControl : Control, IDisposable
     }
 
     // ---------------------------------------------------------------------------------
+    // Keyboard input
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Turns pan mode on or off.
+    /// </summary>
+    /// <param name="armed">Whether the left button should grab the canvas instead of drawing.</param>
+    /// <remarks>
+    /// Public because the space key has to work wherever the artist last clicked. If this
+    /// were driven only by the control's own key handling, pressing space after touching the
+    /// layers panel would do nothing, and an artist who has just picked a layer is exactly
+    /// the artist who wants to reposition the canvas. The hosting view listens at the window
+    /// level and calls this; see <c>EditorDocumentView</c>.
+    /// </remarks>
+    public void SetSpacePanArmed(bool armed)
+    {
+        if (armed)
+        {
+            // Arming mid-stroke would leave a half-drawn line behind, so the request is
+            // ignored until the button is released. Key auto-repeat calls this every few
+            // milliseconds, which is why it has to be idempotent.
+            if (_isSpacePanArmed || _activeButton != ToolPointerButton.None)
+            {
+                return;
+            }
+
+            _isSpacePanArmed = true;
+            UpdateCursor();
+            return;
+        }
+
+        DisarmSpacePan();
+    }
+
+    /// <inheritdoc />
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        if (e.Key == Key.Space)
+        {
+            SetSpacePanArmed(true);
+            e.Handled = true;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+
+        if (e.Key == Key.Space)
+        {
+            DisarmSpacePan();
+            e.Handled = true;
+        }
+    }
+
+    /// <inheritdoc />
+    protected override void OnLostFocus(FocusChangedEventArgs e)
+    {
+        base.OnLostFocus(e);
+
+        // Alt-tabbing away while holding space means the key-up never arrives here, which
+        // would leave the canvas stuck in pan mode with a hand cursor.
+        DisarmSpacePan();
+    }
+
+    private void DisarmSpacePan()
+    {
+        if (!_isSpacePanArmed)
+        {
+            return;
+        }
+
+        _isSpacePanArmed = false;
+
+        // A pan already under way is allowed to finish on the button release rather than
+        // being cut short, which is what an artist who lifts space slightly early expects.
+        UpdateCursor();
+    }
+
+    /// <summary>
+    /// Reflects the current mode in the pointer: an open hand while pan mode is armed, a
+    /// closed one while actually dragging, and the inherited cursor otherwise.
+    /// </summary>
+    private void UpdateCursor()
+    {
+        Cursor = (_isSpacePanArmed, _isPanning) switch
+        {
+            (true, true) => new Cursor(StandardCursorType.SizeAll),
+            (true, false) => new Cursor(StandardCursorType.Hand),
+            _ => Cursor.Default,
+        };
+    }
+
+    // ---------------------------------------------------------------------------------
     // Pointer input
     // ---------------------------------------------------------------------------------
 
@@ -361,11 +489,14 @@ public sealed class PixelCanvasControl : Control, IDisposable
         PointerPointProperties properties = e.GetCurrentPoint(this).Properties;
         Point position = e.GetPosition(this);
 
-        if (properties.IsMiddleButtonPressed)
+        // Space turns any button into a grab handle, so the check comes before the tool is
+        // ever consulted; the middle button pans regardless of mode.
+        if (properties.IsMiddleButtonPressed || _isSpacePanArmed)
         {
             _isPanning = true;
             _panOrigin = position;
             _panStartOffset = _transform.Offset;
+            UpdateCursor();
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -397,6 +528,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         if (_isPanning)
         {
+            _hasUserAdjustedView = true;
             ApplyTransform(_transform with { Offset = _panStartOffset + (position - _panOrigin) });
             e.Handled = true;
             return;
@@ -418,6 +550,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         if (_isPanning)
         {
             _isPanning = false;
+            UpdateCursor();
             e.Pointer.Capture(null);
             e.Handled = true;
             return;
@@ -447,6 +580,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         _activeButton = ToolPointerButton.None;
         _isPanning = false;
+        UpdateCursor();
     }
 
     /// <inheritdoc />
@@ -484,7 +618,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         _renderTarget?.Dispose();
         _renderTarget = null;
         _observedDocument = workspace?.Document;
-        _hasFittedView = false;
+        _hasUserAdjustedView = false;
 
         if (_observedDocument is not null)
         {
@@ -499,7 +633,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             context.CompositeSampler = _renderTarget is null ? null : _renderTarget.SampleComposite;
         }
 
-        TryFitOnce();
+        TryFitToViewport();
         InvalidateVisual();
     }
 
@@ -642,8 +776,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
     // View manipulation
     // ---------------------------------------------------------------------------------
 
-    private void ZoomStep(bool zoomIn, Point focus) =>
+    private void ZoomStep(bool zoomIn, Point focus)
+    {
+        // Every stepped zoom is a deliberate act — a menu command, a shortcut or the wheel —
+        // so from here on the view is the artist's and must not be re-fitted behind them.
+        _hasUserAdjustedView = true;
         ApplyTransform(_transform.ZoomTo(_transform.GetSteppedScale(zoomIn), focus));
+    }
 
     private void CenterDocument(double scale)
     {

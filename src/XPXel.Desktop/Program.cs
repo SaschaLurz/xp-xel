@@ -1,4 +1,5 @@
 using Avalonia;
+using Dock.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using XPXel.UI;
 using XPXel.UI.Services;
@@ -41,6 +42,11 @@ internal static class Program
         .Configure(CreateApp)
         .UsePlatformDetect()
         .WithInterFont()
+
+        // A panel torn off into its own window is still a real top-level window, and Avalonia
+        // shuts down when the last one closes. Without this, closing the editor while the
+        // colour panel is floating leaves the process running with only that panel on screen.
+        .CloseFloatingWindowsOnMainWindowClose(true)
         .LogToTrace();
 
     private static App CreateApp()

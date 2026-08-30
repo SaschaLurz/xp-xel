@@ -1,5 +1,6 @@
 using XPXel.Core.ComponentModel;
 using XPXel.Core.Imaging;
+using XPXel.Core.Primitives;
 
 namespace XPXel.Core.Documents;
 
@@ -33,6 +34,7 @@ public abstract class LayerNode : ObservableModel
     private bool _isLocked;
     private double _opacity = 1.0;
     private BlendMode _blendMode = BlendMode.Normal;
+    private PixelColor? _tagColor;
 
     /// <summary>Initialises a layer.</summary>
     /// <param name="id">
@@ -99,6 +101,22 @@ public abstract class LayerNode : ObservableModel
     }
 
     /// <summary>
+    /// An optional colour used to label this layer in the user interface, or
+    /// <see langword="null"/> for no label.
+    /// </summary>
+    /// <remarks>
+    /// This is purely organisational — a way for an artist to group "character", "effects"
+    /// and "background" layers at a glance in a deep stack. It has <b>no</b> effect on
+    /// compositing, and the renderer must never read it. Keeping it on the model rather
+    /// than in a UI-side lookup is what allows it to survive a save and reload.
+    /// </remarks>
+    public PixelColor? TagColor
+    {
+        get => _tagColor;
+        set => SetProperty(ref _tagColor, value);
+    }
+
+    /// <summary>
     /// The group that contains this layer, or <see langword="null"/> for the document's
     /// root. Maintained by <see cref="GroupLayer"/>; never assign it directly.
     /// </summary>
@@ -145,6 +163,7 @@ public abstract class LayerNode : ObservableModel
         target.IsLocked = IsLocked;
         target.Opacity = Opacity;
         target.BlendMode = BlendMode;
+        target.TagColor = TagColor;
     }
 
     /// <inheritdoc />

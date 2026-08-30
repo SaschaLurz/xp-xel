@@ -5,17 +5,24 @@
   window, and the browser head hosts it directly, so the entire user interface is shared
   across every platform and only the frame differs.
 
-  Layout is a DockPanel - menu and options bar at the top, status bar at the bottom,
-  toolbox on the left, layers and colours on the right, canvas filling what remains. The
-  whole thing sits in a Grid so a modal dialog can be overlaid on top of it, which is how
+  The menu, the tool options bar and the status bar are fixed. Everything between them is a
+  DockControl: the toolbox, layers and colour panels and the document tabs are all dockables
+  that the artist can drag, tab together, float into their own windows, pin to an edge or
+  close. Their arrangement is built by XpDockFactory on first run and restored from settings
+  afterwards.
+
+  The whole thing sits in a Grid so a modal dialog can be overlaid on top of it, which is how
   XP-xel does dialogs everywhere (the browser has no child windows).
+
+  Note that the panel DataTemplates live in App.axaml, not here. A panel dragged out into a
+  floating window is in a different window and would not see templates declared on this
+  control.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:controls="using:XPXel.UI.Controls"
-             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:dock="using:Dock.Avalonia.Controls"
+             xmlns:docking="using:XPXel.UI.Docking"
              xmlns:services="using:XPXel.UI.Services"
-             xmlns:views="using:XPXel.UI.Views"
              xmlns:vm="using:XPXel.UI.ViewModels"
              x:Class="XPXel.UI.Views.MainView"
              x:DataType="vm:MainViewModel">
@@ -26,20 +33,12 @@
     <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
     <KeyBinding Gesture="Ctrl+E" Command="{Binding ExportCommand}" />
+    <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseDocumentCommand}" />
     <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="X" Command="{Binding SwapColorsCommand}" />
   </UserControl.KeyBindings>
-
-  <UserControl.DataTemplates>
-    <DataTemplate DataType="dialogs:ConfirmDialogViewModel">
-      <views:ConfirmDialogView />
-    </DataTemplate>
-    <DataTemplate DataType="dialogs:NewDocumentDialogViewModel">
-      <views:NewDocumentDialogView />
-    </DataTemplate>
-  </UserControl.DataTemplates>
 
   <Grid Background="{DynamicResource XpAppBackgroundBrush}">
 
@@ -57,6 +56,8 @@
           <MenuItem Header="Save _As…" InputGesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
           <Separator />
           <MenuItem Header="_Export Image…" InputGesture="Ctrl+E" Command="{Binding ExportCommand}" />
+          <Separator />
+          <MenuItem Header="_Close Document" InputGesture="Ctrl+W" Command="{Binding CloseDocumentCommand}" />
         </MenuItem>
 
         <MenuItem Header="_Edit">
@@ -77,16 +78,27 @@
 
         <MenuItem Header="_View">
           <!-- These four carry no InputGesture: the shortcuts are handled in code-behind
-               because they act on the canvas control's view state rather than on a command,
-               and Avalonia would render the raw key names ("Ctrl+OemPlus") here. -->
-          <MenuItem Header="Zoom _In" Click="OnZoomInClick" />
-          <MenuItem Header="Zoom _Out" Click="OnZoomOutClick" />
-          <MenuItem Header="_Actual Size" Click="OnZoomActualClick" />
-          <MenuItem Header="Zoom to _Fit" Click="OnZoomFitClick" />
+               because Avalonia would render the raw key names ("Ctrl+OemPlus") here. -->
+          <MenuItem Header="Zoom _In" Command="{Binding ZoomCommand}"
+                    CommandParameter="{x:Static docking:CanvasZoomRequest.In}" />
+          <MenuItem Header="Zoom _Out" Command="{Binding ZoomCommand}"
+                    CommandParameter="{x:Static docking:CanvasZoomRequest.Out}" />
+          <MenuItem Header="_Actual Size" Command="{Binding ZoomCommand}"
+                    CommandParameter="{x:Static docking:CanvasZoomRequest.ActualSize}" />
+          <MenuItem Header="Zoom to _Fit" Command="{Binding ZoomCommand}"
+                    CommandParameter="{x:Static docking:CanvasZoomRequest.Fit}" />
           <Separator />
           <MenuItem Header="Show Pixel _Grid"
                     ToggleType="CheckBox"
-                    IsChecked="{Binding ShowPixelGrid, Mode=TwoWay}" />
+                    IsChecked="{Binding CanvasSettings.ShowPixelGrid, Mode=TwoWay}" />
+          <Separator />
+          <MenuItem Header="_Panels">
+            <MenuItem Header="_Tools" Command="{Binding ShowPanelCommand}" CommandParameter="Toolbox" />
+            <MenuItem Header="_Layers" Command="{Binding ShowPanelCommand}" CommandParameter="Layers" />
+            <MenuItem Header="_Colour" Command="{Binding ShowPanelCommand}" CommandParameter="Colour" />
+            <Separator />
+            <MenuItem Header="_Reset Layout" Command="{Binding ResetLayoutCommand}" />
+          </MenuItem>
           <Separator />
           <MenuItem Header="_Theme">
             <MenuItem Header="Follow _System"
@@ -157,35 +169,9 @@
       </Border>
 
       <!-- ============================================================================
-           Toolbox
+           The dockable workspace: panels and document tabs
            ============================================================================ -->
-      <Border DockPanel.Dock="Left" Classes="panel">
-        <views:ToolboxView DataContext="{Binding Toolbox}" />
-      </Border>
-
-      <!-- ============================================================================
-           Layers and colours
-           ============================================================================ -->
-      <Border DockPanel.Dock="Right" Classes="panel" Width="268">
-        <Grid RowDefinitions="*,Auto">
-          <views:LayersView Grid.Row="0" DataContext="{Binding Layers}" />
-          <views:ColorPanelView Grid.Row="1" DataContext="{Binding Palette}" />
-        </Grid>
-      </Border>
-
-      <!-- ============================================================================
-           Canvas
-           ============================================================================ -->
-      <controls:PixelCanvasControl x:Name="PixelCanvas"
-                                   Workspace="{Binding Workspace}"
-                                   ToolContext="{Binding ToolContext}"
-                                   ActiveTool="{Binding ActiveTool}"
-                                   ShowPixelGrid="{Binding ShowPixelGrid}"
-                                   CanvasBackground="{DynamicResource XpCanvasBackgroundBrush}"
-                                   CanvasBorderBrush="{DynamicResource XpCanvasBorderBrush}"
-                                   PixelGridBrush="{DynamicResource XpPixelGridBrush}"
-                                   CheckerboardLight="{DynamicResource XpCheckerLightColor}"
-                                   CheckerboardDark="{DynamicResource XpCheckerDarkColor}" />
+      <dock:DockControl Layout="{Binding Layout}" Factory="{Binding Factory}" />
 
     </DockPanel>
 

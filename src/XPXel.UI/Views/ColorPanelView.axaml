@@ -16,7 +16,8 @@
 
   <StackPanel Margin="0,4,0,8">
 
-    <TextBlock Text="COLOUR" Classes="panelHeader" />
+    <!-- No "COLOUR" heading: the panel's dock tab already carries the name. "PALETTE"
+         below stays, because it labels a distinct section within the panel. -->
 
     <!-- ================================================================================
          The two active colours

@@ -24,6 +24,9 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" />
+
+    <!-- For the AppBuilder options that control how torn-off panels behave as windows. -->
+    <PackageReference Include="Dock.Settings" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>

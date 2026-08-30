@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using XPXel.Core.Documents;
@@ -28,9 +29,29 @@ namespace XPXel.UI.ViewModels;
 /// </remarks>
 public sealed partial class LayersViewModel : ViewModelBase, IDisposable
 {
+    /// <summary>
+    /// How long the panel waits after the last pixel change before re-rendering previews.
+    /// </summary>
+    /// <remarks>
+    /// Rendering a preview costs time proportional to the canvas, so doing it straight from
+    /// the document's change event would rebuild every row on every pointer move of a
+    /// stroke. A short delay coalesces a whole stroke into one rebuild while still feeling
+    /// immediate — the preview updates before the artist can look away from the canvas.
+    /// </remarks>
+    private static readonly TimeSpan ThumbnailRefreshDelay = TimeSpan.FromMilliseconds(150);
+
+    private readonly DispatcherTimer _thumbnailTimer;
+
     private DocumentWorkspace? _workspace;
     private PixelDocument? _observedDocument;
     private bool _isRebuilding;
+
+    /// <summary>Initialises the panel.</summary>
+    public LayersViewModel()
+    {
+        _thumbnailTimer = new DispatcherTimer { Interval = ThumbnailRefreshDelay };
+        _thumbnailTimer.Tick += OnThumbnailTimerTick;
+    }
 
     [ObservableProperty]
     private LayerItemViewModel? _selectedLayer;
@@ -64,6 +85,9 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        _thumbnailTimer.Stop();
+        _thumbnailTimer.Tick -= OnThumbnailTimerTick;
+
         if (_observedDocument is not null)
         {
             _observedDocument.Changed -= OnDocumentChanged;
@@ -92,11 +116,16 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         SelectLayer(layer);
     }
 
-    /// <summary>Copies the selected layer, artwork and all, and selects the copy.</summary>
+    /// <summary>Copies a layer, artwork and all, and selects the copy.</summary>
+    /// <param name="row">
+    /// The layer to copy, or <see langword="null"/> for the selected one. Dropping a row
+    /// onto the "new layer" button passes it explicitly, because the dragged layer is not
+    /// necessarily the selected one.
+    /// </param>
     [RelayCommand(CanExecute = nameof(HasSelection))]
-    private void DuplicateLayer()
+    private void DuplicateLayer(LayerItemViewModel? row)
     {
-        if (_workspace is not { } workspace || SelectedLayer is not { } selected)
+        if (_workspace is not { } workspace || (row ?? SelectedLayer) is not { } selected)
         {
             return;
         }
@@ -169,7 +198,118 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         if (e.Kind == DocumentChangeKind.Structure)
         {
             Rebuild();
+            return;
         }
+
+        if (e.Kind == DocumentChangeKind.Pixels)
+        {
+            ScheduleThumbnailRefresh();
+        }
+    }
+
+    /// <summary>
+    /// Requests a preview rebuild, restarting the delay so a burst of changes costs one
+    /// rebuild rather than one per change.
+    /// </summary>
+    private void ScheduleThumbnailRefresh()
+    {
+        _thumbnailTimer.Stop();
+        _thumbnailTimer.Start();
+    }
+
+    private void OnThumbnailTimerTick(object? sender, EventArgs e)
+    {
+        _thumbnailTimer.Stop();
+        RefreshThumbnails();
+    }
+
+    /// <summary>
+    /// Re-renders every row's preview.
+    /// </summary>
+    /// <remarks>
+    /// Every row is refreshed rather than only the one being drawn on, because an undo, a
+    /// redo or a future scripted edit can change any layer and the change event does not say
+    /// which. A stale preview is a visible bug, so correctness wins here. If documents ever
+    /// grow large enough for this to be felt, the fix is to carry the affected layer on
+    /// <see cref="DocumentChangedEventArgs"/> rather than to guess here.
+    /// </remarks>
+    private void RefreshThumbnails()
+    {
+        if (_workspace is not { } workspace)
+        {
+            return;
+        }
+
+        foreach (LayerItemViewModel row in Layers)
+        {
+            row.RefreshThumbnail(workspace.Document, workspace.ActiveFrame);
+        }
+    }
+
+    /// <summary>
+    /// Moves a dragged layer next to another row, which is how the panel reorders the stack.
+    /// </summary>
+    /// <param name="source">The row being dragged.</param>
+    /// <param name="target">The row it was dropped on.</param>
+    /// <param name="insertAbove">
+    /// <see langword="true"/> to place it above the target <i>as displayed</i>, which means
+    /// a higher index in the document's bottom-first storage order.
+    /// </param>
+    public void ReorderLayer(LayerItemViewModel source, LayerItemViewModel target, bool insertAbove)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (_workspace is not { } workspace
+            || ReferenceEquals(source, target)
+            || target.Layer.Parent is not { } parent)
+        {
+            return;
+        }
+
+        // Dragging a group into its own descendant would detach that subtree from the
+        // document. GroupLayer guards against this too, but failing silently here avoids
+        // pushing a no-op onto the undo stack.
+        if (source.Layer is GroupLayer group && IsDescendantOf(target.Layer, group))
+        {
+            return;
+        }
+
+        int targetIndex = parent.IndexOf(target.Layer);
+        int destination = insertAbove ? targetIndex + 1 : targetIndex;
+
+        // Within one group the move is remove-then-insert, so every position above the
+        // layer's old slot shifts down by one and the destination must follow.
+        int sourceIndex = parent.IndexOf(source.Layer);
+        if (sourceIndex >= 0 && sourceIndex < destination)
+        {
+            destination--;
+        }
+
+        destination = Math.Clamp(destination, 0, Math.Max(0, parent.Children.Count - 1));
+        if (sourceIndex == destination && ReferenceEquals(source.Layer.Parent, parent))
+        {
+            return;
+        }
+
+        workspace.History.Execute(new MoveLayerCommand(
+            "Reorder Layer", workspace.Document, source.Layer, parent, destination));
+
+        SelectLayer(source.Layer);
+    }
+
+    /// <summary>Walks up the parent chain to test containment.</summary>
+    private static bool IsDescendantOf(LayerNode node, GroupLayer ancestor)
+    {
+        for (LayerNode? current = node; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void Rebuild()
@@ -198,6 +338,10 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         // Selection was assigned while suppressed, so push it to the workspace now.
         ApplySelectionToWorkspace();
         NotifyCommandsCanExecuteChanged();
+
+        // New rows start with no preview, so render immediately rather than waiting for the
+        // throttle: an empty box beside a layer reads as "this layer is empty".
+        RefreshThumbnails();
     }
 
     /// <summary>Walks the tree in reverse so the top-most layer ends up first in the list.</summary>

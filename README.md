@@ -15,13 +15,18 @@ from a single codebase.
 
 ## What works today
 
-- **Layers**, with per-layer opacity, visibility, locking, and fourteen W3C-standard blend
-  modes.
+- **A workspace you arrange yourself.** Every panel is a tab that can be dragged to another
+  edge, tabbed together with another panel, pinned, closed, or torn off into its own
+  floating window. Images open as document tabs, several at a time. The arrangement is
+  remembered between sessions, and **View → Panels → Reset Layout** puts it back.
+- **Layers**, with per-layer opacity, visibility, locking, fourteen W3C-standard blend
+  modes, a live preview of each layer's own contents, colour labels, and drag-and-drop
+  restacking. Dropping a layer on the **+** button duplicates it.
 - **Tools**: pencil, eraser, bucket fill (with tolerance, contiguous or global), and a
   colour picker that samples the flattened image.
 - **Undo and redo** for every edit, with a stroke counting as one step.
-- **Canvas**: nearest-neighbour zoom to 64×, pan, a transparency checkerboard, and a pixel
-  grid that appears as you zoom in.
+- **Canvas**: nearest-neighbour zoom to 64×, hold **Space** to grab and drag the image, a
+  transparency checkerboard, and a pixel grid that appears as you zoom in.
 - **Colour**: RGBA channel editor, hexadecimal input, and a per-document palette.
 - **Files**: `.xpxel` projects that preserve everything, plus PNG import and export with
   integer upscaling.
@@ -59,13 +64,21 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Action | Input |
 | --- | --- |
 | Draw with the primary / secondary colour | Left / right mouse button |
-| Pan the canvas | Middle mouse button drag |
+| Pan the canvas | Hold `Space` and drag, or middle mouse button drag |
 | Zoom | Mouse wheel, or `Ctrl` `+` / `Ctrl` `-` |
 | Actual size / fit to window | `Ctrl` `0` / `Ctrl` `1` |
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
 | Swap colours | `X` |
 | New / open / save / export | `Ctrl` `N` / `O` / `S` / `E` |
+| Close the current document | `Ctrl` `W` |
 | Sample the active layer only | Hold `Alt` with the colour picker |
+| Rename a layer | Double-click its name |
+| Restack a layer | Drag it up or down the list |
+| Duplicate a layer | Drag it onto the **+** button |
+| Label a layer with a colour | Right-click it |
+
+Panels are moved by dragging their title bar. Drop one on an edge of another panel to dock
+it there, on the middle to tab it together, or anywhere outside the window to float it.
 
 ## Project layout
 
@@ -113,13 +126,15 @@ Roughly in the order these are likely to be tackled:
   Godot and Unreal.
 - **Layer folders** — the document model and compositor already support them; they need a
   UI.
+- **Restoring floating panels as floating** — the arrangement is remembered, but a panel
+  that was torn off into its own window comes back docked in the next session.
 
 ## Built with
 
-[Avalonia](https://avaloniaui.net/) on .NET 10. Avalonia is the only mature .NET UI
-framework covering desktop, mobile and the browser from one codebase, and it renders through
-Skia — which is exactly the control a pixel editor needs over how its pixels reach the
-screen.
+[Avalonia](https://avaloniaui.net/) on .NET 10, with [Dock](https://github.com/wieslawsoltes/Dock)
+for the movable panels. Avalonia is the only mature .NET UI framework covering desktop,
+mobile and the browser from one codebase, and it renders through Skia — which is exactly the
+control a pixel editor needs over how its pixels reach the screen.
 
 ## Licence
 

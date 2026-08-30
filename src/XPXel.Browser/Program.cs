@@ -1,6 +1,8 @@
 using System.Runtime.Versioning;
 using Avalonia;
 using Avalonia.Browser;
+using Dock.Model.Core;
+using Dock.Settings;
 using Microsoft.Extensions.DependencyInjection;
 using XPXel.UI;
 using XPXel.UI.Services;
@@ -31,6 +33,12 @@ internal static class Program
     /// <returns>A task that completes when the application shuts down.</returns>
     private static Task Main(string[] args) => BuildAvaloniaApp()
         .WithInterFont()
+
+        // A browser tab has no child windows, so a panel dragged out of the shell cannot
+        // become an operating-system window the way it does on the desktop. Managed mode
+        // floats it inside the page instead, which is what keeps "tear a panel off" working
+        // identically on every platform rather than silently doing nothing here.
+        .UseFloatingWindowHostMode(DockFloatingWindowHostMode.Managed)
         .StartBrowserAppAsync("out");
 
     /// <summary>Configures Avalonia.</summary>

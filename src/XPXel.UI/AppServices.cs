@@ -108,12 +108,20 @@ public static class AppServices
         services.AddSingleton<IFileDialogService, StorageFileDialogService>();
         services.AddSingleton<IThemeService, ThemeService>();
 
+        // Remembers where the artist left the panels. Registered alongside the theme service
+        // because both are preferences that outlive a session.
+        services.AddSingleton<DockLayoutStore>();
+
         // Forgetful by default. A head that can persist settings registers its own store.
         services.AddSingleton<ISettingsStore, InMemorySettingsStore>();
     }
 
     private static void AddViewModels(IServiceCollection services)
     {
+        // One shared instance, so turning the pixel grid on applies to every open document
+        // and stays on when the artist switches tabs.
+        services.AddSingleton<CanvasSettings>();
+
         services.AddSingleton<ToolboxViewModel>();
         services.AddSingleton<LayersViewModel>();
         services.AddSingleton<PaletteViewModel>();

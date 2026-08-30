@@ -54,8 +54,23 @@ public partial class App : Application
         switch (ApplicationLifetime)
         {
             case IClassicDesktopStyleApplicationLifetime desktop:
-                desktop.MainWindow = new MainWindow { DataContext = viewModel };
+            {
+                MainWindow window = new() { DataContext = viewModel };
+                desktop.MainWindow = window;
+
+                // Preferences that are written as they change — the theme, the last tool —
+                // are already on disk. The panel arrangement is not: it is read from the live
+                // docking tree, so it can only be captured on the way out.
+                //
+                // The two hooks are not interchangeable. The layout is saved from Closing,
+                // because torn-off panels are real windows that get closed before the
+                // application exits, and by exit time a floating panel has already been
+                // folded back into the docked tree. Teardown happens on Exit, which is the
+                // last thing to run.
+                window.Closing += (_, _) => viewModel.SaveLayout();
+                desktop.Exit += (_, _) => viewModel.Dispose();
                 break;
+            }
 
             case ISingleViewApplicationLifetime singleView:
                 singleView.MainView = new MainView { DataContext = viewModel };

@@ -44,6 +44,11 @@ public sealed class ProjectSerializerTests
         Assert.Equal(0.5, top.Opacity, 3);
         Assert.False(top.IsVisible);
         Assert.True(top.IsLocked);
+        Assert.Equal(Red, top.TagColor);
+
+        // A layer that carries no label must reload without one, rather than picking up a
+        // default colour.
+        Assert.Null(bottom.TagColor);
 
         Assert.Equal("Test Palette", reloaded.Palette.Name);
         Assert.Equal(2, reloaded.Palette.Colors.Count);
@@ -217,6 +222,7 @@ public sealed class ProjectSerializerTests
         shading.Opacity = 0.5;
         shading.IsVisible = false;
         shading.IsLocked = true;
+        shading.TagColor = Red;
         document.GetOrCreateCel(shading, document.Frames[0]).Pixels.FillRect(new ImageRect(0, 0, 4, 4), Blue);
 
         document.Palette.Name = "Test Palette";

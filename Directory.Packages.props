@@ -27,6 +27,11 @@
 
     <!-- Single source of truth for the Avalonia version. Bump here to upgrade the UI stack. -->
     <AvaloniaVersion>12.1.1</AvaloniaVersion>
+
+    <!-- Dock ships one version per Avalonia version and pins Avalonia exactly, so this
+         must track $(AvaloniaVersion). Upgrading Avalonia without upgrading Dock produces
+         a NuGet downgrade error rather than a silent mismatch, which is the good outcome. -->
+    <DockVersion>12.1.0.6</DockVersion>
   </PropertyGroup>
 
   <!-- ================================================================================
@@ -38,6 +43,24 @@
     <PackageVersion Include="Avalonia.Browser" Version="$(AvaloniaVersion)" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+
+  <!-- ================================================================================
+       Docking (Dock.Avalonia)
+
+       Provides the Visual Studio style shell: panels that can be dragged out, re-docked,
+       tabbed together, floated and pinned. Dock.Model.Mvvm is the CommunityToolkit.Mvvm
+       flavour of the model, which is the one that matches the rest of this codebase; the
+       ReactiveUI flavour would drag in a second MVVM framework.
+
+       Dock.Serializer.SystemTextJson persists the arrangement between sessions.
+       ================================================================================ -->
+  <ItemGroup>
+    <PackageVersion Include="Dock.Avalonia" Version="$(DockVersion)" />
+    <PackageVersion Include="Dock.Avalonia.Themes.Fluent" Version="$(DockVersion)" />
+    <PackageVersion Include="Dock.Model.Mvvm" Version="$(DockVersion)" />
+    <PackageVersion Include="Dock.Serializer.SystemTextJson" Version="$(DockVersion)" />
+    <PackageVersion Include="Dock.Settings" Version="$(DockVersion)" />
   </ItemGroup>
 
   <!-- ================================================================================

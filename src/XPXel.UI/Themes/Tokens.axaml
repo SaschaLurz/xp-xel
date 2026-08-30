@@ -39,6 +39,10 @@
 
       <Color x:Key="XpCheckerLightColor">#FFCFCFCF</Color>
       <Color x:Key="XpCheckerDarkColor">#FFA8A8A8</Color>
+
+      <!-- A flat mid grey behind layer previews. A real checkerboard would compete with the
+           artwork at 30 pixels square, where the squares would be larger than the sprite. -->
+      <SolidColorBrush x:Key="XpThumbnailCheckerBrush" Color="#FFBEBEBE" />
     </ResourceDictionary>
 
     <!-- ================================================================================
@@ -62,6 +66,8 @@
            dark artwork disappear into it, which is the opposite of what it is for. -->
       <Color x:Key="XpCheckerLightColor">#FF6E6E70</Color>
       <Color x:Key="XpCheckerDarkColor">#FF56565A</Color>
+
+      <SolidColorBrush x:Key="XpThumbnailCheckerBrush" Color="#FF5F5F63" />
     </ResourceDictionary>
 
   </ResourceDictionary.ThemeDictionaries>

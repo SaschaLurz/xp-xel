@@ -51,8 +51,8 @@ frame.
    layer "bg"   [ cel ]     [  —  ]     [ cel ]
 ```
 
-v0.1 creates exactly one frame and shows no timeline, so from the outside it looks like an
-ordinary layered editor. The reason for the extra axis is that the obvious alternative —
+The editor creates exactly one frame and shows no timeline, so from the outside it looks
+like an ordinary layered editor. The reason for the extra axis is that the obvious alternative —
 each layer owns one image — collapses "which layer" and "which moment" into a single
 dimension. Adding animation on top of that model later would mean simultaneously
 restructuring the document, the compositor, every tool, the undo system and the file format.
@@ -64,9 +64,14 @@ cels are keyed by `(layerId, frameId)`. If they were positional, inserting or re
 frame would require rewriting every cel key and every undo record that mentions one. With
 stable identities, reordering is a list operation and nothing else in the document notices.
 
+`LayerNode.TagColor` is worth a note here because it is the one property on a layer that the
+renderer must never read. It is an organisational label — a way to see at a glance which
+layers are the character and which are the background — and it deliberately lives on the
+model rather than in a UI-side lookup so that it survives a save and reload.
+
 Two smaller decisions follow the same reasoning:
 
-- **The layers form a tree, not a list.** Only `RasterLayer` can be created in v0.1, but
+- **The layers form a tree, not a list.** Only `RasterLayer` can be created today, but
   `GroupLayer` exists and the compositor handles it, so layer folders are a UI feature away.
 - **Ordering is bottom-first.** `GroupLayer.Children[0]` is the *bottom* layer, which lets
   the compositor walk forwards. Layer panels conventionally show the top layer first, so the
@@ -230,7 +235,61 @@ straight-alpha `PixelBuffer` that the compositor writes into and a premultiplied
 > returns, so reading it while arranging yields a zero size. The control tracks the arranged
 > size itself.
 
-### 6.2 View models and dialogs
+The canvas keeps re-fitting the document whenever its viewport changes size, and stops the
+moment the artist zooms or pans. Fitting only once was enough before docking; a docked canvas
+is arranged several times at growing sizes while the layout settles, and fitting to the first
+of those left the artwork parked in a corner. Continuing to re-fit *after* a deliberate zoom
+would be worse than either, so `_hasUserAdjustedView` draws the line.
+
+Holding space turns the left button into a grab handle. The key is watched on the window
+rather than on the canvas, because it has to work regardless of which panel was clicked last
+— an artist who has just picked a layer is exactly the one who wants to move the view. It
+steps aside while a text box has focus, where a space is a space.
+
+### 6.2 The shell is a docking layout
+
+The panels and the document tabs are not laid out by the shell. `MainView` contributes only
+a menu, a tool options bar and a status bar; everything between them is a `DockControl` whose
+contents the artist arranges by dragging.
+
+**`XpDockFactory` describes the default arrangement and nothing more.** After the first run
+the layout belongs to the artist and is restored from settings. Three things about it are
+worth knowing before changing anything:
+
+- **Ids are the persistence key.** Every dockable carries a stable `Id`, because that is what
+  a saved layout stores. Renaming one orphans that panel in layouts saved by older builds.
+  The loader tolerates it — the panel simply returns to its default place — but it is a
+  silent change in behaviour for existing users.
+- **A saved layout stores structure, not view models.** A `PanelTool` comes back with its
+  `Content` empty and `XpDockFactory.RestorePanelContent` reattaches the live panels by id.
+  The content property is `[JsonIgnore]`d, and it has to be: a panel view model reaches the
+  document, its layers and their parent references, which is a cycle the serialiser throws
+  on. Because saving the layout is deliberately best-effort, that throw is swallowed, and the
+  only symptom is that the arrangement is silently never remembered.
+- **Documents are never persisted.** Artwork lives in `.xpxel` files, not in a settings file,
+  so any document found in a restored layout is an empty shell and is discarded on load.
+
+The layout is captured when the main window is *closing*, not when the application exits.
+Torn-off panels are real windows that get closed before exit, and by exit time a floating
+panel has already been folded back into the docked tree.
+
+**One panel, many documents.** Each open image is an `EditorDocument` holding one
+`DocumentWorkspace`; the layers and colour panels are single instances re-pointed at whichever
+tab is active. This is why the original `Attach` design mattered: multi-document support
+turned out to be a collection of workspaces rather than a restructuring of the editor, exactly
+as intended.
+
+Anything genuinely shared across documents — the current tool, the brush, the two colours,
+whether the pixel grid is on — lives outside the document, because an artist expects to pick
+a brush once and keep it while switching tabs. Anything about how one image is being *viewed*
+— its zoom, the pixel under the pointer — lives on the document.
+
+> A trap worth remembering: a floating panel is an ordinary top-level window, and Avalonia
+> shuts down when the last one closes. Without
+> `CloseFloatingWindowsOnMainWindowClose`, closing the editor while a panel is floating leaves
+> the process running with only that panel on screen.
+
+### 6.3 View models and dialogs
 
 MVVM with **CommunityToolkit.Mvvm**, chosen over ReactiveUI because its
 `[ObservableProperty]` and `[RelayCommand]` are compile-time source generators with no
@@ -241,7 +300,7 @@ Dialogs are **overlays inside the shell**, not child windows, because the browse
 child windows. One implementation therefore behaves identically everywhere. A dialog exposes
 its result as a `Task`, so calling code reads as a straight line rather than as callbacks.
 
-### 6.3 Theming
+### 6.4 Theming
 
 Every colour in the application comes from semantic tokens in `Themes/Tokens.axaml`, defined
 once per theme variant. No view names a literal colour. `IThemeService` only switches the
@@ -249,7 +308,7 @@ variant; setting it to `Default` makes Avalonia resolve the theme from the opera
 and update live when the OS setting changes. Adding a high-contrast or custom theme is a
 resource dictionary, not a code change.
 
-### 6.4 Composition
+### 6.5 Composition
 
 `AppServices` is the composition root and is the extension point for most new features. A
 new tool, format or panel is a class plus one line there. Registration order is deliberately

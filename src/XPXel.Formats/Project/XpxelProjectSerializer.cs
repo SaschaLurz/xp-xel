@@ -199,6 +199,13 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
             ? blendMode
             : BlendMode.Normal;
 
+        // An unparseable label colour drops the label rather than failing the load. The
+        // colour is decoration, and refusing to open an entire project over it would be a
+        // poor trade.
+        layer.TagColor = entry.TagColor is { Length: > 0 } tag && PixelColor.TryParseHex(tag, out PixelColor tagColor)
+            ? tagColor
+            : null;
+
         document.InsertLayer(layer, parent);
 
         if (layer is GroupLayer group)
@@ -339,6 +346,7 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
             IsLocked = layer.IsLocked,
             Opacity = layer.Opacity,
             BlendMode = layer.BlendMode.ToString(),
+            TagColor = layer.TagColor?.ToHex(),
         };
 
         if (layer is GroupLayer group)

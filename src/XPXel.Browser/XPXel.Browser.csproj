@@ -31,6 +31,9 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Browser" />
+
+    <!-- For the AppBuilder option that floats panels inside the page instead of in OS windows. -->
+    <PackageReference Include="Dock.Settings" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>

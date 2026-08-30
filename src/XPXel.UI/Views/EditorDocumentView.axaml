@@ -1,0 +1,29 @@
+<!--
+  One document tab's contents: the pixel canvas for that image.
+
+  This is a view rather than a bare PixelCanvasControl in the data template because the zoom
+  commands need somewhere to live. Zoom-to-fit depends on the viewport size, which only the
+  canvas control knows, so the shell raises a request on the document and this view — which
+  is the only thing that knows which canvas belongs to which document — forwards it.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:XPXel.UI.Controls"
+             xmlns:docking="using:XPXel.UI.Docking"
+             x:Class="XPXel.UI.Views.EditorDocumentView"
+             x:DataType="docking:EditorDocument">
+
+  <controls:PixelCanvasControl x:Name="PixelCanvas"
+                               Workspace="{Binding Workspace}"
+                               ToolContext="{Binding ToolContext}"
+                               ActiveTool="{Binding Toolbox.ActiveTool}"
+                               ShowPixelGrid="{Binding CanvasSettings.ShowPixelGrid}"
+                               Zoom="{Binding Zoom, Mode=TwoWay}"
+                               HoveredPixel="{Binding HoveredPixel, Mode=TwoWay}"
+                               CanvasBackground="{DynamicResource XpCanvasBackgroundBrush}"
+                               CanvasBorderBrush="{DynamicResource XpCanvasBorderBrush}"
+                               PixelGridBrush="{DynamicResource XpPixelGridBrush}"
+                               CheckerboardLight="{DynamicResource XpCheckerLightColor}"
+                               CheckerboardDark="{DynamicResource XpCheckerDarkColor}" />
+
+</UserControl>

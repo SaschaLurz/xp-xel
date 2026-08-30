@@ -103,6 +103,18 @@ internal sealed class LayerManifest
     /// <summary>The blend mode name; an unrecognised value loads as Normal.</summary>
     public string BlendMode { get; set; } = nameof(Core.Imaging.BlendMode.Normal);
 
+    /// <summary>
+    /// The layer's organisational label colour as <c>#RRGGBBAA</c>, or <see langword="null"/>
+    /// when the layer carries no label.
+    /// </summary>
+    /// <remarks>
+    /// Added after schema version 1 shipped. It needs no migration and no version bump
+    /// because it is optional with a sensible default: a file written by an older build
+    /// simply has no colour, and a file written by a newer build still opens in an older
+    /// build, which ignores the property.
+    /// </remarks>
+    public string? TagColor { get; set; }
+
     /// <summary>Nested layers, bottom-most first. Empty for a raster layer.</summary>
     public List<LayerManifest> Children { get; set; } = [];
 }
