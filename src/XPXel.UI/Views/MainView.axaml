@@ -1,0 +1,205 @@
+<!--
+  The application shell.
+
+  This is a UserControl rather than a Window on purpose: the desktop head wraps it in a
+  window, and the browser head hosts it directly, so the entire user interface is shared
+  across every platform and only the frame differs.
+
+  Layout is a DockPanel - menu and options bar at the top, status bar at the bottom,
+  toolbox on the left, layers and colours on the right, canvas filling what remains. The
+  whole thing sits in a Grid so a modal dialog can be overlaid on top of it, which is how
+  XP-xel does dialogs everywhere (the browser has no child windows).
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:XPXel.UI.Controls"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:services="using:XPXel.UI.Services"
+             xmlns:views="using:XPXel.UI.Views"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.MainView"
+             x:DataType="vm:MainViewModel">
+
+  <UserControl.KeyBindings>
+    <KeyBinding Gesture="Ctrl+N" Command="{Binding NewDocumentCommand}" />
+    <KeyBinding Gesture="Ctrl+O" Command="{Binding OpenCommand}" />
+    <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
+    <KeyBinding Gesture="Ctrl+E" Command="{Binding ExportCommand}" />
+    <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
+    <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
+    <KeyBinding Gesture="X" Command="{Binding SwapColorsCommand}" />
+  </UserControl.KeyBindings>
+
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="dialogs:ConfirmDialogViewModel">
+      <views:ConfirmDialogView />
+    </DataTemplate>
+    <DataTemplate DataType="dialogs:NewDocumentDialogViewModel">
+      <views:NewDocumentDialogView />
+    </DataTemplate>
+  </UserControl.DataTemplates>
+
+  <Grid Background="{DynamicResource XpAppBackgroundBrush}">
+
+    <DockPanel>
+
+      <!-- ============================================================================
+           Menu
+           ============================================================================ -->
+      <Menu DockPanel.Dock="Top">
+        <MenuItem Header="_File">
+          <MenuItem Header="_New…" InputGesture="Ctrl+N" Command="{Binding NewDocumentCommand}" />
+          <MenuItem Header="_Open…" InputGesture="Ctrl+O" Command="{Binding OpenCommand}" />
+          <Separator />
+          <MenuItem Header="_Save" InputGesture="Ctrl+S" Command="{Binding SaveCommand}" />
+          <MenuItem Header="Save _As…" InputGesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
+          <Separator />
+          <MenuItem Header="_Export Image…" InputGesture="Ctrl+E" Command="{Binding ExportCommand}" />
+        </MenuItem>
+
+        <MenuItem Header="_Edit">
+          <MenuItem Header="_Undo" InputGesture="Ctrl+Z" Command="{Binding UndoCommand}" />
+          <MenuItem Header="_Redo" InputGesture="Ctrl+Y" Command="{Binding RedoCommand}" />
+          <Separator />
+          <MenuItem Header="S_wap Colours" InputGesture="X" Command="{Binding SwapColorsCommand}" />
+        </MenuItem>
+
+        <MenuItem Header="_Layer">
+          <MenuItem Header="_New Layer" Command="{Binding Layers.AddLayerCommand}" />
+          <MenuItem Header="_Duplicate Layer" Command="{Binding Layers.DuplicateLayerCommand}" />
+          <MenuItem Header="De_lete Layer" Command="{Binding Layers.DeleteLayerCommand}" />
+          <Separator />
+          <MenuItem Header="Move _Up" Command="{Binding Layers.MoveLayerUpCommand}" />
+          <MenuItem Header="Move _Down" Command="{Binding Layers.MoveLayerDownCommand}" />
+        </MenuItem>
+
+        <MenuItem Header="_View">
+          <!-- These four carry no InputGesture: the shortcuts are handled in code-behind
+               because they act on the canvas control's view state rather than on a command,
+               and Avalonia would render the raw key names ("Ctrl+OemPlus") here. -->
+          <MenuItem Header="Zoom _In" Click="OnZoomInClick" />
+          <MenuItem Header="Zoom _Out" Click="OnZoomOutClick" />
+          <MenuItem Header="_Actual Size" Click="OnZoomActualClick" />
+          <MenuItem Header="Zoom to _Fit" Click="OnZoomFitClick" />
+          <Separator />
+          <MenuItem Header="Show Pixel _Grid"
+                    ToggleType="CheckBox"
+                    IsChecked="{Binding ShowPixelGrid, Mode=TwoWay}" />
+          <Separator />
+          <MenuItem Header="_Theme">
+            <MenuItem Header="Follow _System"
+                      ToggleType="Radio"
+                      GroupName="Theme"
+                      Command="{Binding SetThemeCommand}"
+                      CommandParameter="{x:Static services:AppTheme.System}" />
+            <MenuItem Header="_Light"
+                      ToggleType="Radio"
+                      GroupName="Theme"
+                      Command="{Binding SetThemeCommand}"
+                      CommandParameter="{x:Static services:AppTheme.Light}" />
+            <MenuItem Header="_Dark"
+                      ToggleType="Radio"
+                      GroupName="Theme"
+                      Command="{Binding SetThemeCommand}"
+                      CommandParameter="{x:Static services:AppTheme.Dark}" />
+          </MenuItem>
+        </MenuItem>
+      </Menu>
+
+      <!-- ============================================================================
+           Tool options
+           ============================================================================ -->
+      <Border DockPanel.Dock="Top" Classes="panel" Padding="8,5">
+        <StackPanel Orientation="Horizontal" Spacing="14">
+
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Text="Brush" Classes="subtle" VerticalAlignment="Center" />
+            <NumericUpDown Value="{Binding Toolbox.ToolSettings.BrushSize, Mode=TwoWay}"
+                           Minimum="1" Maximum="64" Increment="1"
+                           FormatString="0" Width="90" />
+            <ComboBox ItemsSource="{x:Static vm:ToolboxViewModel.BrushShapes}"
+                      SelectedItem="{Binding Toolbox.ToolSettings.BrushShape, Mode=TwoWay}"
+                      Width="100" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Text="Fill tolerance" Classes="subtle" VerticalAlignment="Center" />
+            <NumericUpDown Value="{Binding Toolbox.ToolSettings.FillTolerance, Mode=TwoWay}"
+                           Minimum="0" Maximum="255" Increment="1"
+                           FormatString="0" Width="90" />
+            <CheckBox Content="Contiguous"
+                      IsChecked="{Binding Toolbox.ToolSettings.IsFillContiguous, Mode=TwoWay}"
+                      VerticalAlignment="Center" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Text="Export scale" Classes="subtle" VerticalAlignment="Center" />
+            <NumericUpDown Value="{Binding ExportScale, Mode=TwoWay}"
+                           Minimum="1" Maximum="16" Increment="1"
+                           FormatString="0" Width="90" />
+          </StackPanel>
+
+        </StackPanel>
+      </Border>
+
+      <!-- ============================================================================
+           Status bar
+           ============================================================================ -->
+      <Border DockPanel.Dock="Bottom" Classes="panel" Padding="8,4">
+        <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+          <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Classes="subtle" />
+          <TextBlock Grid.Column="1" Text="{Binding HoveredPixelText}" Classes="subtle" Margin="12,0" />
+          <TextBlock Grid.Column="2" Text="{Binding DocumentSizeText}" Classes="subtle" Margin="12,0" />
+          <TextBlock Grid.Column="3" Text="{Binding ZoomText}" Classes="subtle" Margin="12,0" />
+        </Grid>
+      </Border>
+
+      <!-- ============================================================================
+           Toolbox
+           ============================================================================ -->
+      <Border DockPanel.Dock="Left" Classes="panel">
+        <views:ToolboxView DataContext="{Binding Toolbox}" />
+      </Border>
+
+      <!-- ============================================================================
+           Layers and colours
+           ============================================================================ -->
+      <Border DockPanel.Dock="Right" Classes="panel" Width="268">
+        <Grid RowDefinitions="*,Auto">
+          <views:LayersView Grid.Row="0" DataContext="{Binding Layers}" />
+          <views:ColorPanelView Grid.Row="1" DataContext="{Binding Palette}" />
+        </Grid>
+      </Border>
+
+      <!-- ============================================================================
+           Canvas
+           ============================================================================ -->
+      <controls:PixelCanvasControl x:Name="PixelCanvas"
+                                   Workspace="{Binding Workspace}"
+                                   ToolContext="{Binding ToolContext}"
+                                   ActiveTool="{Binding ActiveTool}"
+                                   ShowPixelGrid="{Binding ShowPixelGrid}"
+                                   CanvasBackground="{DynamicResource XpCanvasBackgroundBrush}"
+                                   CanvasBorderBrush="{DynamicResource XpCanvasBorderBrush}"
+                                   PixelGridBrush="{DynamicResource XpPixelGridBrush}"
+                                   CheckerboardLight="{DynamicResource XpCheckerLightColor}"
+                                   CheckerboardDark="{DynamicResource XpCheckerDarkColor}" />
+
+    </DockPanel>
+
+    <!-- ==============================================================================
+         Modal overlay. Hit-testing the scrim is what makes the dialog modal: it swallows
+         every click aimed at the editor beneath.
+         ============================================================================== -->
+    <Border Background="{DynamicResource XpScrimBrush}"
+            IsVisible="{Binding Dialogs.IsOpen}">
+      <ContentControl Content="{Binding Dialogs.Current}"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
+    </Border>
+
+  </Grid>
+
+</UserControl>

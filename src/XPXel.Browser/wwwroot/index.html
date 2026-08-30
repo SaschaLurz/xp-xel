@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!--
+  The page that hosts XP-xel in a browser.
+
+  Avalonia renders the whole application into the #out element, so there is deliberately no
+  HTML structure here beyond that single mount point. Everything visual is drawn by the same
+  code the desktop build runs.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>XP-xel</title>
+  <base href="/" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div id="out"></div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

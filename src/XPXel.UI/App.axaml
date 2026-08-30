@@ -1,0 +1,26 @@
+<!--
+  The Avalonia application object.
+
+  RequestedThemeVariant is Default, which means "resolve from the operating system".
+  IThemeService overrides it when the artist picks light or dark explicitly, and sets it
+  back to Default for "follow the system".
+-->
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="XPXel.UI.App"
+             RequestedThemeVariant="Default">
+
+  <Application.Styles>
+    <FluentTheme />
+    <StyleInclude Source="avares://XPXel.UI/Themes/Controls.axaml" />
+  </Application.Styles>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://XPXel.UI/Themes/Tokens.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+</Application>

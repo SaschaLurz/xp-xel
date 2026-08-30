@@ -1,0 +1,25 @@
+/*
+  XP-xel - host page styling.
+
+  The application fills the viewport exactly and never scrolls: Avalonia draws into a single
+  canvas that it sizes itself, and a scrollbar here would fight the editor's own panning.
+
+  touch-action: none stops mobile browsers interpreting a drawing gesture as a page scroll
+  or pinch-zoom, which would otherwise make the canvas unusable on a tablet.
+*/
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #1e1e1e;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#out {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  overscroll-behavior: none;
+}

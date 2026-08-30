@@ -1,0 +1,56 @@
+<!--
+  The new-document dialog: a canvas size, with presets for the sizes sprite work actually
+  starts from.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:sys="using:System"
+             x:Class="XPXel.UI.Views.NewDocumentDialogView"
+             x:DataType="dialogs:NewDocumentDialogViewModel">
+
+  <Border Classes="dialogSurface">
+    <StackPanel Spacing="14">
+
+      <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+
+      <Grid ColumnDefinitions="Auto,*,Auto,*" RowDefinitions="Auto">
+        <TextBlock Grid.Column="0" Text="Width" VerticalAlignment="Center" Classes="subtle" />
+        <NumericUpDown Grid.Column="1" Margin="8,0,16,0"
+                       Minimum="1" Maximum="4096" Increment="1" FormatString="0"
+                       Value="{Binding Width, Mode=TwoWay}" />
+        <TextBlock Grid.Column="2" Text="Height" VerticalAlignment="Center" Classes="subtle" />
+        <NumericUpDown Grid.Column="3" Margin="8,0,0,0"
+                       Minimum="1" Maximum="4096" Increment="1" FormatString="0"
+                       Value="{Binding Height, Mode=TwoWay}" />
+      </Grid>
+
+      <StackPanel>
+        <TextBlock Text="Presets" Classes="subtle" Margin="0,0,0,4" />
+        <ItemsControl ItemsSource="{x:Static dialogs:NewDocumentDialogViewModel.Presets}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="sys:Int32">
+              <Button Margin="0,0,4,4"
+                      MinWidth="52"
+                      Content="{Binding}"
+                      Command="{Binding $parent[ItemsControl].((dialogs:NewDocumentDialogViewModel)DataContext).ApplyPresetCommand}"
+                      CommandParameter="{Binding}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" />
+        <Button Content="Create" IsDefault="True" Command="{Binding CreateCommand}" />
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+
+</UserControl>

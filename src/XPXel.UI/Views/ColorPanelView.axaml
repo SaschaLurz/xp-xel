@@ -1,0 +1,114 @@
+<!--
+  The colour panel: the two active colours, a channel editor for the primary one, and the
+  document palette.
+
+  Channel sliders and a hexadecimal field rather than a colour wheel - exact numbers are
+  what pixel artists work in, and hex is how palettes are shared. A spectrum picker is a
+  sensible later addition and would sit above these, writing to the same colour slots.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:XPXel.UI.Converters"
+             xmlns:prim="using:XPXel.Core.Primitives"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.ColorPanelView"
+             x:DataType="vm:PaletteViewModel">
+
+  <StackPanel Margin="0,4,0,8">
+
+    <TextBlock Text="COLOUR" Classes="panelHeader" />
+
+    <!-- ================================================================================
+         The two active colours
+         ================================================================================ -->
+    <Grid ColumnDefinitions="Auto,Auto,*" Margin="8,0,8,8">
+      <Border Grid.Column="0"
+              Width="40" Height="40"
+              Background="{Binding PrimaryBrush}"
+              BorderBrush="{DynamicResource XpPanelBorderBrush}"
+              BorderThickness="1"
+              ToolTip.Tip="Primary colour — left mouse button" />
+      <Border Grid.Column="1"
+              Width="28" Height="28"
+              Margin="6,12,0,0"
+              Background="{Binding SecondaryBrush}"
+              BorderBrush="{DynamicResource XpPanelBorderBrush}"
+              BorderThickness="1"
+              ToolTip.Tip="Secondary colour — right mouse button" />
+      <Button Grid.Column="2"
+              Content="⇄"
+              Margin="8,0,0,0"
+              VerticalAlignment="Top"
+              Command="{Binding SwapColorsCommand}"
+              ToolTip.Tip="Swap colours (X)" />
+    </Grid>
+
+    <!-- ================================================================================
+         Channels
+         ================================================================================ -->
+    <Grid Margin="8,0" ColumnDefinitions="16,*,36" RowDefinitions="Auto,Auto,Auto,Auto">
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="R" Classes="subtle" VerticalAlignment="Center" />
+      <Slider Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding Red, Mode=TwoWay}" />
+      <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Red, StringFormat={}{0:F0}}"
+                 Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="G" Classes="subtle" VerticalAlignment="Center" />
+      <Slider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding Green, Mode=TwoWay}" />
+      <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding Green, StringFormat={}{0:F0}}"
+                 Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="B" Classes="subtle" VerticalAlignment="Center" />
+      <Slider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding Blue, Mode=TwoWay}" />
+      <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding Blue, StringFormat={}{0:F0}}"
+                 Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+      <TextBlock Grid.Row="3" Grid.Column="0" Text="A" Classes="subtle" VerticalAlignment="Center" />
+      <Slider Grid.Row="3" Grid.Column="1" Minimum="0" Maximum="255" Value="{Binding Alpha, Mode=TwoWay}" />
+      <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding Alpha, StringFormat={}{0:F0}}"
+                 Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+    </Grid>
+
+    <TextBox Margin="8,6,8,0"
+             Text="{Binding Hex, Mode=TwoWay}"
+             PlaceholderText="#RRGGBB"
+             ToolTip.Tip="Hexadecimal colour — accepts #RGB, #RGBA, #RRGGBB and #RRGGBBAA" />
+
+    <!-- ================================================================================
+         Palette
+         ================================================================================ -->
+    <Grid ColumnDefinitions="*,Auto" Margin="0,10,8,0">
+      <TextBlock Grid.Column="0" Text="PALETTE" Classes="panelHeader" />
+      <Button Grid.Column="1" Content="+" Width="24" Height="22" Padding="0"
+              Command="{Binding AddPrimaryToPaletteCommand}"
+              ToolTip.Tip="Add the primary colour to the palette" />
+    </Grid>
+
+    <ScrollViewer MaxHeight="150" Margin="8,4,8,0">
+      <ItemsControl ItemsSource="{Binding Palette.Colors}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <WrapPanel />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="prim:PixelColor">
+            <!-- The swatch reports its own colour as the command parameter, so the palette
+                 stays a plain list of colours with no per-entry view model. -->
+            <Button Classes="swatch"
+                    Background="{Binding Converter={x:Static conv:PixelColorToBrushConverter.Instance}}"
+                    Command="{Binding $parent[ItemsControl].((vm:PaletteViewModel)DataContext).SelectPrimaryCommand}"
+                    CommandParameter="{Binding}">
+              <ToolTip.Tip>
+                <TextBlock Text="{Binding}" />
+              </ToolTip.Tip>
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+  </StackPanel>
+
+</UserControl>

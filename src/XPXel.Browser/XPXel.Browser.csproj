@@ -1,0 +1,42 @@
+<!--
+  XPXel.Browser - the WebAssembly head.
+
+  The same XPXel.UI runs unchanged in a browser: Avalonia compiles to WebAssembly and draws
+  the whole interface onto a single HTML canvas. There is no HTML layout to maintain and no
+  server-side component - the published output is a folder of static files.
+
+  This head exists from the first version deliberately. WebAssembly is where platform
+  assumptions surface (native binaries, reflection, file paths), and finding them now is far
+  cheaper than discovering a year of accumulated assumptions later.
+-->
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-browser</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>XPXel.Browser</RootNamespace>
+    <AssemblyName>XPXel.Browser</AssemblyName>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- The JavaScript module that boots the .NET runtime. -->
+    <WasmMainJSPath>wwwroot\main.js</WasmMainJSPath>
+
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!-- Required by the [JSImport] source generator, which emits pointer-based marshalling
+         for JavaScript interop. It applies to this head only; no other project in the
+         solution enables unsafe code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Browser" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPXel.UI\XPXel.UI.csproj" />
+  </ItemGroup>
+
+</Project>

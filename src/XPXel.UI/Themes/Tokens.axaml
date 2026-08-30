@@ -1,0 +1,69 @@
+<!--
+  XP-xel - semantic colour tokens.
+
+  Every colour in the application comes from this file. Views reference tokens by role
+  ("panel background", "subtle text"), never a literal colour, which is what makes the
+  light and dark themes a data change rather than a code change - and what will make a
+  future high-contrast or custom theme one as well.
+
+  Avalonia picks the matching dictionary from the active ThemeVariant, which IThemeService
+  sets. When the variant is Default, Avalonia resolves it from the operating system and
+  updates it live, so "follow the OS" needs no code here at all.
+
+  Naming: Xp<Role><Kind>, where Kind is Brush or Color. The canvas control needs raw
+  Colors rather than brushes for its checkerboard, because it builds a bitmap from them.
+-->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <ResourceDictionary.ThemeDictionaries>
+
+    <!-- ================================================================================
+         Light
+         ================================================================================ -->
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="XpAppBackgroundBrush" Color="#FFF2F2F2" />
+      <SolidColorBrush x:Key="XpPanelBackgroundBrush" Color="#FFFAFAFA" />
+      <SolidColorBrush x:Key="XpPanelBorderBrush" Color="#FFD8D8D8" />
+      <SolidColorBrush x:Key="XpForegroundBrush" Color="#FF1B1B1B" />
+      <SolidColorBrush x:Key="XpSubtleForegroundBrush" Color="#FF6B6B6B" />
+      <SolidColorBrush x:Key="XpAccentBrush" Color="#FF2D6CDF" />
+      <SolidColorBrush x:Key="XpAccentForegroundBrush" Color="#FFFFFFFF" />
+
+      <!-- A mid grey behind the canvas: dark enough that white artwork reads clearly,
+           light enough that black artwork does too. -->
+      <SolidColorBrush x:Key="XpCanvasBackgroundBrush" Color="#FF9A9A9A" />
+      <SolidColorBrush x:Key="XpCanvasBorderBrush" Color="#FF3C3C3C" />
+      <SolidColorBrush x:Key="XpPixelGridBrush" Color="#26000000" />
+      <SolidColorBrush x:Key="XpScrimBrush" Color="#66000000" />
+
+      <Color x:Key="XpCheckerLightColor">#FFCFCFCF</Color>
+      <Color x:Key="XpCheckerDarkColor">#FFA8A8A8</Color>
+    </ResourceDictionary>
+
+    <!-- ================================================================================
+         Dark
+         ================================================================================ -->
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="XpAppBackgroundBrush" Color="#FF1E1E1E" />
+      <SolidColorBrush x:Key="XpPanelBackgroundBrush" Color="#FF252526" />
+      <SolidColorBrush x:Key="XpPanelBorderBrush" Color="#FF3A3A3C" />
+      <SolidColorBrush x:Key="XpForegroundBrush" Color="#FFE6E6E6" />
+      <SolidColorBrush x:Key="XpSubtleForegroundBrush" Color="#FF9A9A9A" />
+      <SolidColorBrush x:Key="XpAccentBrush" Color="#FF4E8EF7" />
+      <SolidColorBrush x:Key="XpAccentForegroundBrush" Color="#FF10141C" />
+
+      <SolidColorBrush x:Key="XpCanvasBackgroundBrush" Color="#FF303032" />
+      <SolidColorBrush x:Key="XpCanvasBorderBrush" Color="#FF808080" />
+      <SolidColorBrush x:Key="XpPixelGridBrush" Color="#26FFFFFF" />
+      <SolidColorBrush x:Key="XpScrimBrush" Color="#99000000" />
+
+      <!-- The checkerboard stays mid-toned in both themes. Making it dark here would let
+           dark artwork disappear into it, which is the opposite of what it is for. -->
+      <Color x:Key="XpCheckerLightColor">#FF6E6E70</Color>
+      <Color x:Key="XpCheckerDarkColor">#FF56565A</Color>
+    </ResourceDictionary>
+
+  </ResourceDictionary.ThemeDictionaries>
+
+</ResourceDictionary>

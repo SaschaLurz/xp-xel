@@ -1,0 +1,34 @@
+<!--
+  A message with up to three responses.
+
+  The three-button layout exists for "Save / Discard / Cancel" when closing a modified
+  document; the extra buttons hide themselves when a caller does not need them.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             x:Class="XPXel.UI.Views.ConfirmDialogView"
+             x:DataType="dialogs:ConfirmDialogViewModel">
+
+  <Border Classes="dialogSurface">
+    <StackPanel Spacing="14">
+
+      <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+      <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="{Binding CancelText}"
+                IsVisible="{Binding HasCancel}"
+                Command="{Binding CancelCommand}" />
+        <Button Content="{Binding AlternativeText}"
+                IsVisible="{Binding HasAlternative}"
+                Command="{Binding ChooseAlternativeCommand}" />
+        <Button Content="{Binding ConfirmText}"
+                IsDefault="True"
+                Command="{Binding ConfirmCommand}" />
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+
+</UserControl>

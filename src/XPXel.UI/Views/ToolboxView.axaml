@@ -1,0 +1,57 @@
+<!--
+  The toolbox.
+
+  A ListBox rather than a group of toggle buttons: single-selection is exactly the semantics
+  a toolbox needs, and getting it from the control means there is no "which button is on"
+  state to keep in sync.
+
+  The list is driven by ToolRegistry, so a newly registered tool appears here without this
+  file changing.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.ToolboxView"
+             x:DataType="vm:ToolboxViewModel">
+
+  <ListBox ItemsSource="{Binding Tools}"
+           SelectedItem="{Binding SelectedTool, Mode=TwoWay}"
+           Width="52"
+           Padding="2"
+           Background="Transparent"
+           BorderThickness="0">
+
+    <ListBox.ItemsPanel>
+      <ItemsPanelTemplate>
+        <StackPanel Orientation="Vertical" />
+      </ItemsPanelTemplate>
+    </ListBox.ItemsPanel>
+
+    <ListBox.Styles>
+      <Style Selector="ListBoxItem">
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="0,1" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      </Style>
+    </ListBox.Styles>
+
+    <ListBox.ItemTemplate>
+      <DataTemplate x:DataType="vm:ToolItemViewModel">
+        <Border Height="42" Background="Transparent">
+          <ToolTip.Tip>
+            <StackPanel MaxWidth="260">
+              <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,2,0,0" />
+            </StackPanel>
+          </ToolTip.Tip>
+          <TextBlock Text="{Binding Glyph}"
+                     FontSize="19"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+        </Border>
+      </DataTemplate>
+    </ListBox.ItemTemplate>
+
+  </ListBox>
+
+</UserControl>
