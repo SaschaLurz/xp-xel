@@ -96,8 +96,47 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
     /// <summary>A brush showing the current colour.</summary>
     public IBrush PreviewBrush => _color.ToBrush();
 
-    /// <summary>The current colour in hexadecimal, for the readout.</summary>
-    public string HexText => _color.ToHex();
+    /// <summary>
+    /// The current colour in hexadecimal, readable and writable.
+    /// </summary>
+    /// <remarks>
+    /// Writable because hexadecimal is how palettes are shared: an artist working from a
+    /// reference or a published palette has the number, not a position on a wheel. Anything
+    /// that does not parse is ignored rather than rejected, so a half-typed value on the way to
+    /// a valid one does not fight the person typing it.
+    /// </remarks>
+    public string HexText
+    {
+        get => _color.ToHex();
+        set
+        {
+            if (PixelColor.TryParseHex(value, out PixelColor parsed) && parsed != _color)
+            {
+                Load(parsed, TargetLabel, CanSave);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The saturation as a fraction, which is what the spectrum control works in.
+    /// </summary>
+    /// <remarks>
+    /// The sliders show percentages because that is what an artist reads, and the spectrum
+    /// works in fractions because that is what the colour model uses. Rather than pick one and
+    /// convert at every call site, the two views of the same number live side by side here.
+    /// </remarks>
+    public double SaturationFraction
+    {
+        get => Saturation / 100.0;
+        set => Saturation = Math.Clamp(value, 0.0, 1.0) * 100.0;
+    }
+
+    /// <summary>The value as a fraction, for the spectrum control.</summary>
+    public double ValueFraction
+    {
+        get => Value / 100.0;
+        set => Value = Math.Clamp(value, 0.0, 1.0) * 100.0;
+    }
 
     /// <summary>Gets a value indicating whether any harmonies were worth offering.</summary>
     public bool HasHarmonies => Harmonies.Count > 0;
@@ -162,9 +201,17 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
 
     partial void OnHueChanged(double value) => ApplyFromSliders();
 
-    partial void OnSaturationChanged(double value) => ApplyFromSliders();
+    partial void OnSaturationChanged(double value)
+    {
+        OnPropertyChanged(nameof(SaturationFraction));
+        ApplyFromSliders();
+    }
 
-    partial void OnValueChanged(double value) => ApplyFromSliders();
+    partial void OnValueChanged(double value)
+    {
+        OnPropertyChanged(nameof(ValueFraction));
+        ApplyFromSliders();
+    }
 
     partial void OnAlphaChanged(double value) => ApplyFromSliders();
 
@@ -204,5 +251,7 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
         OnPropertyChanged(nameof(Color));
         OnPropertyChanged(nameof(PreviewBrush));
         OnPropertyChanged(nameof(HexText));
+        OnPropertyChanged(nameof(SaturationFraction));
+        OnPropertyChanged(nameof(ValueFraction));
     }
 }

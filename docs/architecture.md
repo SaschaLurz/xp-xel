@@ -644,7 +644,35 @@ text layer being typed on the canvas, since the second has no focused text box a
 handler is attached to the top level rather than to `MainView`, because immediately after
 launch nothing inside the shell has focus and an overridden `OnKeyDown` would never run.
 
-### 6.5 Text
+### 6.5 Marking pixels, and moving them
+
+Two tools mark: the rectangular marquee, and a pixel tool that paints the mask directly for the
+great deal of pixel art that is not a box. They share one gesture through `SelectionTools`:
+**a press that lands on marked pixels picks them up** rather than starting a new mark. Having
+marked something the next thing an artist wants is almost always to move it, and which tool did
+the marking should not change how that works.
+
+The move itself is `SelectionTransform` either way, so Ctrl+T, a drag inside the marks and the
+canvas menu's "Move position" are three doors into one implementation.
+
+Two consequences worth knowing:
+
+- **A mask that can be unmarked has to be able to shrink.** `SetCoverage` only ever grows the
+  bounds, because growing is all marking needs and testing the whole mask per pixel of a drag
+  would be absurd. A tool that unmarks calls `RecalculateBounds` once, when the drag ends.
+- **A mask built pixel by pixel is mutated, not replaced.** Allocating a new mask per pointer
+  sample would be megabytes per drag on a large canvas, so the tool mutates one and calls
+  `DocumentWorkspace.NotifySelectionChanged` — assigning the same instance back raises nothing,
+  because the property compares references.
+
+`IInteractiveTool` is the opt-in extra for a tool that is doing something *between* clicks. Only
+the crop tool needs it: its frame exists from the moment the tool is chosen, survives any number
+of adjustments, and is applied when the artist presses Enter. Rather than widen `ITool` — which
+is as small as it is because nearly every tool is a pure function of the pointer events it is
+handed — the canvas asks whether a tool wants to be told about activation and about the two keys
+that mean yes and no.
+
+### 6.6 Text
 
 **The default font is built into the application**, and that is not a convenience. Every
 outline font on the machine is designed to be rendered with anti-aliasing at paragraph sizes.
@@ -674,7 +702,7 @@ kind of data whose source should look like the thing it describes. A test assert
 characters render identically, which is the one font bug — a mistyped row — that is otherwise
 invisible until an artist writes a word containing both.
 
-### 6.6 Colour
+### 6.7 Colour
 
 `ColorHarmony` and `HsvColor` live in Core rather than the UI, because suggesting the colours
 that go with a colour is arithmetic with no view concepts in it and is worth testing without a
@@ -691,6 +719,12 @@ display. Two decisions in there are worth knowing:
   hue as its own state, which is what lets saturation be pulled to zero and back without the
   colour snapping to red.
 
+**The spectrum is a control, not a dialog.** `ColorSpectrumControl` generates its
+saturation-and-value square as a bitmap once per hue and its hue strip once ever, so dragging
+inside the square moves a marker and touches nothing else. Its hue is its own state rather than
+something recovered from the colour, for the reason above: a grey has no hue, and a control that
+read it back would swing to red the moment saturation reached zero.
+
 **The palette's first ten entries are a hotbar.** They are numbered on screen and answer to
 the number keys. Nothing in the model distinguishes a hotbar slot from any other palette
 entry — the numbers are simply what the first ten positions are worth — so the hotbar needs no
@@ -703,7 +737,7 @@ swatch was clicked. Because it is shared it cannot bind its way to the editor vi
 is shown against a swatch, whose data context is that swatch — so the code-behind assigns it
 when the editor is pointed at something.
 
-### 6.7 View models and dialogs
+### 6.8 View models and dialogs
 
 MVVM with **CommunityToolkit.Mvvm**, chosen over ReactiveUI because its
 `[ObservableProperty]` and `[RelayCommand]` are compile-time source generators with no
@@ -714,7 +748,7 @@ Dialogs are **overlays inside the shell**, not child windows, because the browse
 child windows. One implementation therefore behaves identically everywhere. A dialog exposes
 its result as a `Task`, so calling code reads as a straight line rather than as callbacks.
 
-### 6.8 Theming
+### 6.9 Theming
 
 Every colour in the application comes from semantic tokens in `Themes/Tokens.axaml`, defined
 once per theme variant. No view names a literal colour. `IThemeService` only switches the
@@ -722,7 +756,7 @@ variant; setting it to `Default` makes Avalonia resolve the theme from the opera
 and update live when the OS setting changes. Adding a high-contrast or custom theme is a
 resource dictionary, not a code change.
 
-### 6.9 Composition
+### 6.10 Composition
 
 `AppServices` is the composition root and is the extension point for most new features. A
 new tool, format or panel is a class plus one line there. Registration order is deliberately

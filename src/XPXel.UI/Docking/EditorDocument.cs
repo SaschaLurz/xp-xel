@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Text.Json.Serialization;
+using System.Windows.Input;
 using Avalonia.Platform.Storage;
+using CommunityToolkit.Mvvm.Input;
 using Dock.Model.Mvvm.Controls;
 using XPXel.Core.Editing;
 using XPXel.Core.Primitives;
@@ -74,6 +76,11 @@ public sealed class EditorDocument : Document
         CanPin = false;
 
         workspace.PropertyChanged += OnWorkspacePropertyChanged;
+
+        // On the document rather than on the shell, because the canvas menu binds to the
+        // document — a tab torn off into a floating window has no shell above it to reach.
+        MoveSelectionCommand = new RelayCommand(ToggleSelectionMove);
+
         UpdateTitle();
     }
 
@@ -89,6 +96,25 @@ public sealed class EditorDocument : Document
     /// <summary>The document being edited, together with its undo history and selection.</summary>
     [JsonIgnore]
     public DocumentWorkspace Workspace { get; }
+
+    /// <summary>
+    /// Picks the marked pixels up so they can be dragged, or puts them down again.
+    /// </summary>
+    /// <remarks>
+    /// The same action as Ctrl+T, offered on the canvas menu because right-clicking what you
+    /// have just marked is the other obvious way to ask for it.
+    /// </remarks>
+    [JsonIgnore]
+    public ICommand MoveSelectionCommand { get; }
+
+    /// <summary>Gets a value indicating whether anything is currently marked.</summary>
+    [JsonIgnore]
+    public bool IsAnythingSelected => Workspace.Selection is { IsEmpty: false };
+
+    /// <summary>What the canvas menu's move entry should say, given what is happening.</summary>
+    [JsonIgnore]
+    public string MoveSelectionLabel =>
+        Workspace.ActiveTransform is not null ? "Place the pixels here" : "Move position";
 
     /// <summary>The context handed to tools drawing on this document.</summary>
     [JsonIgnore]
@@ -178,6 +204,24 @@ public sealed class EditorDocument : Document
         {
             UpdateTitle();
         }
+
+        if (e.PropertyName is nameof(DocumentWorkspace.Selection) or nameof(DocumentWorkspace.ActiveTransform))
+        {
+            OnPropertyChanged(nameof(IsAnythingSelected));
+            OnPropertyChanged(nameof(MoveSelectionLabel));
+        }
+    }
+
+    /// <summary>Lifts the marked pixels, or places them if they are already lifted.</summary>
+    private void ToggleSelectionMove()
+    {
+        if (Workspace.ActiveTransform is not null)
+        {
+            Workspace.CommitTransform();
+            return;
+        }
+
+        Workspace.BeginTransform();
     }
 
     private void UpdateTitle()

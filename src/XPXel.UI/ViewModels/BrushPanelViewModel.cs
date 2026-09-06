@@ -116,7 +116,6 @@ public sealed partial class BrushPanelViewModel : ViewModelBase, IDisposable
         Settings.BrushSize = 1;
         Settings.BrushShape = BrushShape.Square;
         Settings.BrushSoftness = 0;
-        Settings.BrushStabilization = 0;
     }
 
     private void OnSettingsChanged(object? sender, PropertyChangedEventArgs e)

@@ -56,19 +56,18 @@
       </ItemsControl>
     </ScrollViewer>
 
+    <!-- The label sits above the field rather than beside it. A docked panel can be dragged
+         narrow, and a label competing for the same row squeezes the number out of sight - which
+         is exactly what it did: a four-digit count showed as "2" and the start of something. -->
     <StackPanel Grid.Row="1" Margin="8,6,8,8" Spacing="4">
       <TextBlock Text="{Binding DepthText}" Classes="subtle" />
-
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-        <TextBlock Grid.Column="0" Text="Keep last" Classes="subtle" VerticalAlignment="Center" />
-        <NumericUpDown Grid.Column="1"
-                       Value="{Binding Capacity, Mode=TwoWay}"
-                       Minimum="1" Maximum="5000"
-                       Increment="10"
-                       FormatString="0"
-                       Width="96"
-                       ToolTip.Tip="How many actions to keep. Each one holds the pixels it changed, so a deeper history costs memory." />
-      </Grid>
+      <TextBlock Text="KEEP LAST" Classes="panelHeader" Margin="0" />
+      <NumericUpDown Value="{Binding Capacity, Mode=TwoWay}"
+                     Minimum="1" Maximum="5000"
+                     Increment="10"
+                     FormatString="0"
+                     HorizontalAlignment="Stretch"
+                     ToolTip.Tip="How many actions to keep. Each one holds the pixels it changed, so a deeper history costs memory." />
     </StackPanel>
 
   </Grid>

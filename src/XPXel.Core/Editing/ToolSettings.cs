@@ -25,7 +25,6 @@ public sealed class ToolSettings : ObservableModel
     private int _brushSize = 1;
     private BrushShape _brushShape = BrushShape.Square;
     private int _brushSoftness;
-    private int _brushStabilization;
     private int _fillTolerance;
     private bool _isFillContiguous = true;
     private bool _isShapeFilled;
@@ -60,21 +59,6 @@ public sealed class ToolSettings : ObservableModel
     {
         get => _brushSoftness;
         set => SetProperty(ref _brushSoftness, Math.Clamp(value, 0, 100));
-    }
-
-    /// <summary>
-    /// How much a freehand stroke's path is smoothed, as a percentage. Zero — the pointer's
-    /// exact path — is the default.
-    /// </summary>
-    /// <remarks>
-    /// Distinct from <see cref="BrushSoftness"/>, and the distinction is worth keeping
-    /// straight: softness changes what one stamp looks like, stabilisation changes where the
-    /// stamps are placed. See <see cref="Drawing.StrokeStabilizer"/>.
-    /// </remarks>
-    public int BrushStabilization
-    {
-        get => _brushStabilization;
-        set => SetProperty(ref _brushStabilization, Math.Clamp(value, 0, 100));
     }
 
     /// <summary>

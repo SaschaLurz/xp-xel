@@ -60,6 +60,9 @@
                                  BorderBrush="{DynamicResource XpPanelBorderBrush}"
                                  HighlightBrush="{DynamicResource XpRulerHighlightBrush}" />
 
+    <!-- HoveredPixel binds one way OUT of the canvas. The canvas is what discovers it and
+         the property is read-only, so a two-way binding spent every pointer move failing to
+         write back into it - a stream of logged errors that would bury a real one. -->
     <controls:PixelCanvasControl x:Name="PixelCanvas"
                                  Grid.Row="1" Grid.Column="1"
                                  Workspace="{Binding Workspace}"
@@ -70,7 +73,7 @@
                                  ZoomSpeed="{Binding CanvasSettings.ZoomSpeed}"
                                  OnionSkin="{Binding CanvasSettings.OnionSkin}"
                                  Zoom="{Binding Zoom, Mode=TwoWay}"
-                                 HoveredPixel="{Binding HoveredPixel, Mode=TwoWay}"
+                                 HoveredPixel="{Binding HoveredPixel, Mode=OneWayToSource}"
                                  CanvasBackground="{DynamicResource XpCanvasBackgroundBrush}"
                                  CanvasBorderBrush="{DynamicResource XpCanvasBorderBrush}"
                                  PixelGridBrush="{DynamicResource XpPixelGridBrush}"
@@ -103,6 +106,17 @@
                        Classes="subtle"
                        TextWrapping="Wrap"
                        IsVisible="{Binding !Toolbox.HasToolOptions}" />
+
+            <!-- Marked pixels. First, because when something is marked it is almost always
+                 what the artist opened this menu about. -->
+            <StackPanel Spacing="6" IsVisible="{Binding IsAnythingSelected}">
+              <Button Content="{Binding MoveSelectionLabel}"
+                      Command="{Binding MoveSelectionCommand}"
+                      HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Center"
+                      ToolTip.Tip="Lift the marked pixels so they can be dragged. Enter places them, Escape puts them back. (Ctrl+T)" />
+              <Separator />
+            </StackPanel>
 
             <!-- Brush -->
             <StackPanel Spacing="6" IsVisible="{Binding Toolbox.ShowsBrushOptions}">
@@ -142,18 +156,6 @@
                            VerticalAlignment="Center" />
               </Grid>
 
-              <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding Toolbox.ShowsBrushDynamics}">
-                <TextBlock Grid.Column="0" Text="Smoothing" Classes="subtle" VerticalAlignment="Center" />
-                <Slider Grid.Column="1" Margin="8,0"
-                        Minimum="0" Maximum="100"
-                        Value="{Binding Toolbox.ToolSettings.BrushStabilization, Mode=TwoWay}" />
-                <TextBlock Grid.Column="2"
-                           Text="{Binding Toolbox.ToolSettings.BrushStabilization}"
-                           Classes="subtle"
-                           Width="30"
-                           TextAlignment="Right"
-                           VerticalAlignment="Center" />
-              </Grid>
             </StackPanel>
 
             <!-- Shapes -->

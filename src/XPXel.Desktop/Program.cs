@@ -30,8 +30,23 @@ internal static class Program
     /// apartment-threaded COM components and fail without it. It is ignored elsewhere.
     /// </remarks>
     [STAThread]
-    public static void Main(string[] args) =>
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+    public static void Main(string[] args)
+    {
+        // Before anything else, so that a failure during start-up is recorded too.
+        CrashLog.Install();
+
+        try
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (Exception ex)
+        {
+            // Observed and rethrown, never swallowed: the process still fails the way it
+            // would have, but now there is a file saying why.
+            CrashLog.Write("Fatal", ex);
+            throw;
+        }
+    }
 
     /// <summary>
     /// Configures Avalonia. Named exactly this and kept public because the XAML previewer
@@ -47,7 +62,10 @@ internal static class Program
         // shuts down when the last one closes. Without this, closing the editor while the
         // colour panel is floating leaves the process running with only that panel on screen.
         .CloseFloatingWindowsOnMainWindowClose(true)
-        .LogToTrace();
+        // Warning and above, which is the level Avalonia reports a failed binding at. A
+        // binding that quietly does nothing is indistinguishable from a feature that does not
+        // work, so these go into the log with everything else.
+        .LogToTrace(Avalonia.Logging.LogEventLevel.Warning);
 
     private static App CreateApp()
     {

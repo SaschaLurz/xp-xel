@@ -1151,8 +1151,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             NotifyEditabilityChanged();
         }
 
-        // Cropping to a selection is only offered while there is one to crop to.
-        if (e.PropertyName is nameof(DocumentWorkspace.Selection))
+        // Cropping to a selection, and offering to move it, are only worth showing while
+        // there is one.
+        if (e.PropertyName is nameof(DocumentWorkspace.Selection) or nameof(DocumentWorkspace.ActiveTransform))
         {
             CropToSelectionCommand.NotifyCanExecuteChanged();
         }

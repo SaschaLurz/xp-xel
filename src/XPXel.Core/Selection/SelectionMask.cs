@@ -115,4 +115,44 @@ public sealed class SelectionMask
     /// <summary>Creates an independent copy of this mask.</summary>
     /// <returns>A new mask with the same contents.</returns>
     public SelectionMask Clone() => new(Size, (byte[])_coverage.Clone(), Bounds);
+
+    /// <summary>
+    /// Recomputes <see cref="Bounds"/> from the coverage actually stored.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SetCoverage"/> can only grow the bounds, because growing is all that marking
+    /// ever needs and testing the whole mask on every pixel of a drag would be absurd. A tool
+    /// that can <em>unmark</em> pixels leaves the bounds too large, which shows up as marching
+    /// ants around a region that is no longer selected and as a mask that never reports itself
+    /// empty. Such a tool calls this once, when the drag ends.
+    /// </remarks>
+    public void RecalculateBounds()
+    {
+        int left = int.MaxValue;
+        int top = int.MaxValue;
+        int right = int.MinValue;
+        int bottom = int.MinValue;
+
+        for (int y = 0; y < Size.Height; y++)
+        {
+            int row = y * Size.Width;
+
+            for (int x = 0; x < Size.Width; x++)
+            {
+                if (_coverage[row + x] == 0)
+                {
+                    continue;
+                }
+
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x + 1);
+                bottom = Math.Max(bottom, y + 1);
+            }
+        }
+
+        Bounds = right > left && bottom > top
+            ? ImageRect.FromEdges(left, top, right, bottom)
+            : ImageRect.Empty;
+    }
 }

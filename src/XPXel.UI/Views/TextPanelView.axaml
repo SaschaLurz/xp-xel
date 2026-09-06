@@ -61,7 +61,7 @@
                          Minimum="{Binding MinimumFontSize}" Maximum="512" Increment="1"
                          FormatString="0.##"
                          ShowButtonSpinner="False"
-                         Width="58" />
+                         Width="64" />
         </Grid>
 
         <TextBlock Classes="subtle" TextWrapping="Wrap"

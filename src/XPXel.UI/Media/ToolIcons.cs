@@ -67,6 +67,10 @@ public static class ToolIcons
         "M21 18 L21 21 L18 21 M14 21 L10 21 M6 21 L3 21 L3 18 M3 14 L3 12";
 
     /// <summary>A question mark, shown for a tool with no icon of its own.</summary>
+    /// <summary>A pixel wand: a marked square with a pointer at it.</summary>
+    public const string PixelSelect =
+        "M3 3 L9 3 L9 9 L3 9 Z M13 4 L20 11 L16 12 L18 17 L16 18 L14 13 L11 15 Z";
+
     /// <summary>A crop frame: two overlapping corner brackets, the printer's mark for it.</summary>
     public const string Crop = "M7 2 L7 17 L22 17 M2 7 L17 7 L17 22";
 

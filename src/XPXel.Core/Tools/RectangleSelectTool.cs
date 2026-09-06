@@ -21,6 +21,10 @@ namespace XPXel.Core.Tools;
 /// marquee, and it is the fastest way out of a selection that is in the way.
 /// </para>
 /// <para>
+/// <b>A press inside an existing selection moves it instead.</b> Having marked something, the
+/// next thing an artist wants is almost always to move it; see <see cref="SelectionTools"/>.
+/// </para>
+/// <para>
 /// <b>Selecting is not undoable.</b> Ctrl+Z is how an artist takes back a mark they made on
 /// the artwork, and spending it on a selection would mean pressing it twice to reach the
 /// stroke they actually meant. Select All, Deselect and Invert in the Select menu are the
@@ -52,6 +56,14 @@ public sealed class RectangleSelectTool : ITool
         ArgumentNullException.ThrowIfNull(e);
 
         if (e.Button is not (ToolPointerButton.Left or ToolPointerButton.Right))
+        {
+            return;
+        }
+
+        // Pressing on pixels that are already marked means "move these", not "start again".
+        // Shared with the pixel select tool, because which tool did the marking should not
+        // change how the marked pixels are picked up.
+        if (SelectionTools.TryBeginMove(context, e.Position))
         {
             return;
         }

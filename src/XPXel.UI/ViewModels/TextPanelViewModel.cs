@@ -77,18 +77,33 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Refills the size list for the font currently chosen.</summary>
+    /// <remarks>
+    /// Rebuilt only when the set actually differs. Clearing a collection a
+    /// <c>ComboBox</c> is bound to drops its selection, and the two-way binding then writes
+    /// that null back — so an unconditional rebuild would reset the artist's font size every
+    /// time the panel read the model, which it does on every keystroke.
+    /// </remarks>
     private void RebuildFontSizes()
     {
-        IReadOnlyList<double> sizes = PixelFont.IsBuiltIn(FontFamily)
-            ? PixelFontRasterizer.GetExactSizes()
+        IReadOnlyList<decimal> sizes = PixelFont.IsBuiltIn(FontFamily)
+            ? [.. PixelFontRasterizer.GetExactSizes().Select(s => (decimal)s)]
             : SystemFontSizes;
+
+        if (AvailableFontSizes.SequenceEqual(sizes))
+        {
+            return;
+        }
+
+        decimal selected = FontSize;
 
         AvailableFontSizes.Clear();
 
-        foreach (double size in sizes)
+        foreach (decimal size in sizes)
         {
             AvailableFontSizes.Add(size);
         }
+
+        FontSize = selected;
     }
 
     /// <summary>The fonts this machine can render, for the family list.</summary>
@@ -100,7 +115,7 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
     /// because an outline font rendered without anti-aliasing stops being readable below it,
     /// and the built-in pixel font is the right answer for anything smaller.
     /// </remarks>
-    private static IReadOnlyList<double> SystemFontSizes { get; } =
+    private static IReadOnlyList<decimal> SystemFontSizes { get; } =
         [10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64, 96];
 
     /// <summary>The sizes offered for the font currently chosen.</summary>
@@ -108,10 +123,10 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
     /// The built-in font is offered only the whole multiples it renders exactly, so that an
     /// artist cannot pick a size and silently be given a different one.
     /// </remarks>
-    public ObservableCollection<double> AvailableFontSizes { get; } = [];
+    public ObservableCollection<decimal> AvailableFontSizes { get; } = [];
 
     /// <summary>The smallest size the chosen font may be set to.</summary>
-    public double MinimumFontSize => TextStyle.GetMinimumFontSize(FontFamily);
+    public decimal MinimumFontSize => (decimal)TextStyle.GetMinimumFontSize(FontFamily);
 
     /// <summary>Gets a value indicating whether the built-in pixel font is chosen.</summary>
     public bool IsPixelFont => PixelFont.IsBuiltIn(FontFamily);
@@ -169,9 +184,19 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private string _fontFamily = TextStyle.DefaultFontFamily;
 
-    /// <summary>The font size in pixels.</summary>
+    /// <summary>
+    /// The font size in pixels.
+    /// </summary>
+    /// <remarks>
+    /// Decimal rather than double, which looks like a needless conversion and is not. Both the
+    /// stepper and the size list bind straight to this, and Avalonia's numeric controls are
+    /// decimal throughout; feeding them a double leaves the framework to find a conversion at
+    /// run time, which it reports as a binding failure rather than a compiler error. Keeping
+    /// the panel in the currency its controls use puts the one conversion here, where it is
+    /// visible.
+    /// </remarks>
     [ObservableProperty]
-    private double _fontSize = 16;
+    private decimal _fontSize = 16;
 
     /// <summary>Whether the text is bold.</summary>
     [ObservableProperty]
@@ -304,7 +329,8 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsPixelFont));
     }
 
-    partial void OnFontSizeChanged(double value) => ApplyStyle("Change Font Size", s => s.FontSize = value);
+    partial void OnFontSizeChanged(decimal value) =>
+        ApplyStyle("Change Font Size", s => s.FontSize = (double)value);
 
     partial void OnIsBoldChanged(bool value) => ApplyStyle("Bold", s => s.IsBold = value);
 
@@ -446,7 +472,7 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
         {
             Text = _target?.Text ?? string.Empty;
             FontFamily = style.FontFamily;
-            FontSize = style.FontSize;
+            FontSize = (decimal)style.FontSize;
             IsBold = style.IsBold;
             IsItalic = style.IsItalic;
             IsUnderline = style.IsUnderline;

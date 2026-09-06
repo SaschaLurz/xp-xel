@@ -4,8 +4,7 @@ using XPXel.Core.Primitives;
 namespace XPXel.Core.Tests;
 
 /// <summary>
-/// Tests for the two things that make a brush a brush rather than a pencil: a soft edge and a
-/// stabilised path.
+/// Tests for the soft edge that makes a brush a brush rather than a pencil.
 /// </summary>
 public sealed class BrushDynamicsTests
 {
@@ -54,55 +53,5 @@ public sealed class BrushDynamicsTests
         KeyValuePair<(int X, int Y), double> only = Assert.Single(covered);
         Assert.Equal((4, 7), only.Key);
         Assert.Equal(1.0, only.Value);
-    }
-
-    [Fact]
-    public void AtZeroStrengthTheStabiliserFollowsThePointerExactly()
-    {
-        StrokeStabilizer stabilizer = new();
-        stabilizer.Begin(new ImagePoint(0, 0));
-
-        Assert.Equal(new ImagePoint(10, 4), stabilizer.Push(new ImagePoint(10, 4), 0.0));
-        Assert.Equal(new ImagePoint(-3, 9), stabilizer.Push(new ImagePoint(-3, 9), 0.0));
-    }
-
-    [Fact]
-    public void TheStabiliserLagsBehindThePointerAndCatchesUpOverTime()
-    {
-        StrokeStabilizer stabilizer = new();
-        stabilizer.Begin(new ImagePoint(0, 0));
-
-        ImagePoint first = stabilizer.Push(new ImagePoint(100, 0), 1.0);
-        Assert.InRange(first.X, 1, 99);
-
-        // Repeated samples at the same place converge on it rather than stalling short.
-        ImagePoint last = first;
-        for (int i = 0; i < 200; i++)
-        {
-            last = stabilizer.Push(new ImagePoint(100, 0), 1.0);
-        }
-
-        Assert.Equal(new ImagePoint(100, 0), last);
-    }
-
-    [Fact]
-    public void FlushingTheStabiliserReturnsTheExactReleasePoint()
-    {
-        StrokeStabilizer stabilizer = new();
-        stabilizer.Begin(new ImagePoint(0, 0));
-        stabilizer.Push(new ImagePoint(50, 50), 1.0);
-
-        Assert.Equal(new ImagePoint(50, 50), stabilizer.Flush(new ImagePoint(50, 50)));
-        Assert.Equal(new ImagePoint(50, 50), stabilizer.Current);
-    }
-
-    [Fact]
-    public void TheFirstPointOfAStrokeIsNeverSmoothed()
-    {
-        StrokeStabilizer stabilizer = new();
-
-        // An artist clicking once to place a single dab expects it exactly where they clicked,
-        // whatever the stabiliser is set to.
-        Assert.Equal(new ImagePoint(7, 9), stabilizer.Push(new ImagePoint(7, 9), 1.0));
     }
 }

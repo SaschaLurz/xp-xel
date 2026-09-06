@@ -13,6 +13,7 @@
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:XPXel.UI.Controls"
              xmlns:vm="using:XPXel.UI.ViewModels"
              x:Class="XPXel.UI.Views.ColorPanelView"
              x:DataType="vm:PaletteViewModel">
@@ -34,11 +35,22 @@
                   Background="{Binding PreviewBrush}"
                   BorderBrush="{DynamicResource XpPanelBorderBrush}"
                   BorderThickness="1" />
-          <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
+          <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" Spacing="2">
             <TextBlock Text="{Binding TargetLabel}" FontWeight="SemiBold" />
-            <TextBlock Text="{Binding HexText}" Classes="subtle" />
+            <TextBox Text="{Binding HexText, Mode=TwoWay}"
+                     FontSize="12"
+                     Padding="4,1"
+                     ToolTip.Tip="The colour in hexadecimal. Type one in to go straight to it." />
           </StackPanel>
         </Grid>
+
+        <!-- The spectrum. Choosing a colour is not usually an exact act - it is "a bit more
+             orange, a bit less washed out" - which is one gesture here and two guesses on a
+             pair of sliders. The sliders stay below for when the exact number is what matters. -->
+        <controls:ColorSpectrumControl Height="150"
+                                       Hue="{Binding Hue, Mode=TwoWay}"
+                                       Saturation="{Binding SaturationFraction, Mode=TwoWay}"
+                                       Value="{Binding ValueFraction, Mode=TwoWay}" />
 
         <!-- Hue, saturation and value rather than red, green and blue. "A little darker" is
              one slider here and three coupled ones in the channel editor above; the two are
@@ -128,10 +140,10 @@
           <Button Content="Draw with it"
                   Command="{Binding ApplyCommand}"
                   ToolTip.Tip="Use this colour without changing the palette" />
-          <Button Content="Save to slot"
+          <Button Content="Save to palette"
                   IsVisible="{Binding CanSave}"
                   Command="{Binding SaveCommand}"
-                  ToolTip.Tip="Replace the palette colour with this one, and draw with it" />
+                  ToolTip.Tip="Replace this palette colour with the one above, and draw with it. Saved with the document." />
         </StackPanel>
 
       </StackPanel>

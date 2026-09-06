@@ -64,7 +64,8 @@ from a single codebase.
   to 64×64, with a nine-way anchor deciding which part of the artwork keeps its place; the
   pixels a crop throws away come back on undo. **Crop to Selection** does the same from a
   marquee.
-- **Colour**: a palette whose first ten swatches are a **hotbar** — they carry the numbers
+- **Colour**: a spectrum picker — a saturation-and-value square beside a hue strip, the
+  layout every image editor uses — plus a palette whose first ten swatches are a **hotbar** — they carry the numbers
   1–9 and 0, and those keys pick them, so the colour you want is one keystroke away. Right-
   click any swatch for the colour editor: hue, saturation, value and alpha sliders, a shading
   ramp that shifts shadows towards blue and highlights towards yellow the way light actually
@@ -124,7 +125,9 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Bucket fill / colour picker | `G` / `I` |
 | Line / rectangle / ellipse | `L` / `R` / `O` |
 | Text / rectangular marquee | `T` / `M` |
-| Crop | `C`, then drag the part to keep |
+| Crop | `C`, drag the frame's edges, then `Enter` |
+| Mark individual pixels | `K`, then click or drag; hold `Alt` to unmark |
+| Move what you have marked | Press inside it and drag, or `Ctrl` `T`, or right-click it |
 | Draw | Left mouse button |
 | Open the active tool's settings | Right-click the canvas |
 | Pan the canvas | Hold `Space` and drag, or middle mouse button drag |
@@ -133,7 +136,7 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
 | Swap the primary and secondary colours | `X` |
 | Pick a palette colour | `1`–`9` and `0` for the first ten swatches |
-| Edit a colour, with a shading ramp and harmonies | Right-click a swatch |
+| Edit a colour on the spectrum, and save it to the palette | Right-click a swatch |
 | New / open / save / export | `Ctrl` `N` / `O` / `S` / `E` |
 | Export the animation | `Ctrl` `Shift` `E` |
 | Close the current document | `Ctrl` `W` |

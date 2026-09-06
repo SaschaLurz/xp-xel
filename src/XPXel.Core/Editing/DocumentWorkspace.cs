@@ -320,6 +320,17 @@ public sealed class DocumentWorkspace : ObservableModel
     }
 
     /// <summary>
+    /// Announces that the current selection's contents have changed, without replacing it.
+    /// </summary>
+    /// <remarks>
+    /// A tool that builds a mask pixel by pixel mutates one mask rather than allocating a new
+    /// one per pointer sample — on a large canvas that would be megabytes per drag. Assigning
+    /// the same instance back raises nothing, because the property compares references, so this
+    /// is how such a tool asks the canvas to repaint the marching ants.
+    /// </remarks>
+    public void NotifySelectionChanged() => OnPropertyChanged(nameof(Selection));
+
+    /// <summary>
     /// The full path the document was last loaded from or saved to, or
     /// <see langword="null"/> for a document that has never been saved.
     /// </summary>

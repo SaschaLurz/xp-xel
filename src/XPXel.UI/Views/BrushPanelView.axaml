@@ -4,9 +4,8 @@
   Four settings and a preview of what they produce. The preview is not a drawing of a brush:
   it runs the same stamping code the tools do, so it is exactly the mark that will be left.
 
-  Softness and stabilisation are labelled with what they each act on, because "smoothness"
-  could plausibly mean either and getting the wrong one is a confusing few minutes. The note
-  at the bottom names the tools that honour them - the pencil deliberately does not.
+  The note at the bottom names the tools that honour softness - the pencil deliberately does
+  not.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -111,23 +110,10 @@
                 ToolTip.Tip="How far in from the rim the brush fades. 0% is a hard pixel-art edge." />
       </StackPanel>
 
-      <!-- ============================================================================
-           Stabilisation - where the stamps go
-           ============================================================================ -->
-      <StackPanel Spacing="4" IsVisible="{Binding Toolbox.ShowsBrushDynamics}">
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Grid.Column="0" Text="STROKE STABILISATION" Classes="panelHeader" Margin="0" />
-          <TextBlock Grid.Column="1" Text="{Binding Settings.BrushStabilization, StringFormat={}{0}%}" Classes="subtle" />
-        </Grid>
-        <Slider Minimum="0" Maximum="100"
-                Value="{Binding Settings.BrushStabilization, Mode=TwoWay}"
-                ToolTip.Tip="How much the pointer's path is smoothed before it is drawn. Steadies a shaky line." />
-      </StackPanel>
-
       <TextBlock Classes="subtle"
                  TextWrapping="Wrap"
                  IsVisible="{Binding Toolbox.ShowsBrushDynamics}"
-                 Text="Softness and stabilisation apply to the Brush and Eraser. The Pencil ignores both so that it always writes one exact colour into one exact pixel." />
+                 Text="Softness applies to the Brush and Eraser. The Pencil ignores it so that it always writes one exact colour into one exact pixel." />
 
       <TextBlock Classes="subtle"
                  TextWrapping="Wrap"

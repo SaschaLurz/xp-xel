@@ -18,12 +18,11 @@ namespace XPXel.Core.Tools;
 /// tool.
 /// </para>
 /// <para>
-/// <b>Brush dynamics are opt-in.</b> Softness and stabilisation are honoured only by tools
-/// that return <see langword="true"/> from <see cref="SupportsBrushDynamics"/>. The pencil
-/// returns <see langword="false"/> on purpose: its entire job is to put one exact colour in
-/// one exact pixel at the position the artist pointed at, and both settings would break that
-/// promise — one by producing half-transparent pixels, the other by drawing somewhere the
-/// artist did not point.
+/// <b>Brush softness is opt-in.</b> It is honoured only by tools that return
+/// <see langword="true"/> from <see cref="SupportsBrushDynamics"/>. The pencil returns
+/// <see langword="false"/> on purpose: its entire job is to put one exact colour in one exact
+/// pixel at the position the artist pointed at, and a soft edge would break that promise by
+/// producing half-transparent pixels around it.
 /// </para>
 /// <para>
 /// <b>Why coverage is remembered for the whole stroke.</b> A soft brush stamps a fading disc
@@ -65,8 +64,6 @@ public abstract class StrokeToolBase : ITool
         Vertical,
     }
 
-    private readonly StrokeStabilizer _stabilizer = new();
-
     /// <summary>
     /// The highest coverage each pixel has reached in this stroke, keyed by packed
     /// coordinate. Only populated for a soft brush; a hard brush needs no bookkeeping,
@@ -80,7 +77,6 @@ public abstract class StrokeToolBase : ITool
     private int _brushSize = 1;
     private BrushShape _brushShape;
     private double _softness;
-    private double _stabilization;
     private Action<int, int>? _stampBrush;
     private Action<int, int, double>? _applyCoverage;
     private StrokeAxis _axis;
@@ -191,11 +187,9 @@ public abstract class StrokeToolBase : ITool
         _brushSize = context.Settings.BrushSize;
         _brushShape = ResolveBrushShape(context);
         _softness = dynamics ? context.Settings.BrushSoftness / 100.0 : 0.0;
-        _stabilization = dynamics ? context.Settings.BrushStabilization / 100.0 : 0.0;
         _stampBrush = StampAt;
         _applyCoverage = ApplyCoverage;
 
-        _stabilizer.Begin(e.Position);
         _lastPoint = e.Position;
 
         StampAt(e.Position.X, e.Position.Y);
@@ -212,11 +206,7 @@ public abstract class StrokeToolBase : ITool
             return;
         }
 
-        ImagePoint target = _stabilization > 0.0
-            ? _stabilizer.Push(e.Position, _stabilization)
-            : e.Position;
-
-        target = ApplyAxisLock(target, e.IsShiftDown);
+        ImagePoint target = ApplyAxisLock(e.Position, e.IsShiftDown);
 
         if (target == _lastPoint)
         {
@@ -239,19 +229,6 @@ public abstract class StrokeToolBase : ITool
         if (_session is not { } session)
         {
             return;
-        }
-
-        // A stabilised stroke lags behind the cursor, so it would otherwise stop short of
-        // where the artist released the button, which reads as the tool dropping the end of
-        // the line.
-        if (_stabilization > 0.0 && _stampBrush is not null && e.Position != _lastPoint)
-        {
-            ImagePoint end = ApplyAxisLock(_stabilizer.Flush(e.Position), e.IsShiftDown);
-
-            if (end != _lastPoint)
-            {
-                LineRasterizer.PlotLine(_lastPoint, end, _stampBrush);
-            }
         }
 
         context.CommitRasterEdit(session);
@@ -363,7 +340,6 @@ public abstract class StrokeToolBase : ITool
         _stampBrush = null;
         _applyCoverage = null;
         _coverage.Clear();
-        _stabilizer.Reset();
         _axis = StrokeAxis.Free;
     }
 }

@@ -466,6 +466,12 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _observedDocument = null;
         }
 
+        // A tool holding a frame for this document must let go of it before the document does.
+        if (ToolContext is { } context)
+        {
+            (ActiveTool as IInteractiveTool)?.OnDeactivated(context);
+        }
+
         ObserveWorkspace(null);
         ObserveToolContext(null);
         ObserveOnionSkin(null);
@@ -660,6 +666,14 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        // Enter and Escape belong to whatever is waiting for an answer. The transform above
+        // gets first refusal; a tool holding a frame gets them next.
+        if (HandleInteractiveToolKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Space)
         {
             SetSpacePanArmed(true);
@@ -717,6 +731,38 @@ public sealed class PixelCanvasControl : Control, IDisposable
             default:
                 return false;
         }
+    }
+
+    /// <summary>Offers Enter and Escape to a tool that is holding something.</summary>
+    private bool HandleInteractiveToolKey(KeyEventArgs e)
+    {
+        if (e.KeyModifiers is not KeyModifiers.None
+            || ActiveTool is not IInteractiveTool interactive
+            || ToolContext is not { } context)
+        {
+            return false;
+        }
+
+        return e.Key switch
+        {
+            Key.Enter => interactive.OnKeyDown(context, ToolKey.Enter),
+            Key.Escape => interactive.OnKeyDown(context, ToolKey.Escape),
+            _ => false,
+        };
+    }
+
+    /// <summary>Takes hold of the lifted artwork at a point, so a drag moves it from there.</summary>
+    private void BeginTransformDrag(Point position)
+    {
+        if (_observedWorkspace?.ActiveTransform is not { } transform)
+        {
+            return;
+        }
+
+        _isDraggingTransform = true;
+        _transformGrabPoint = _transform.ToImagePoint(position);
+        _transformGrabOffset = transform.Offset;
+        _pointerPosition = position;
     }
 
     /// <summary>Moves the lifted artwork to follow the pointer.</summary>
@@ -979,12 +1025,9 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         // A free transform owns the canvas while it lasts: the pixels are off the layer and
         // in the artist's hand, and a tool given a press now would draw into the hole.
-        if (_observedWorkspace?.ActiveTransform is { } transform)
+        if (_observedWorkspace?.ActiveTransform is not null)
         {
-            _isDraggingTransform = true;
-            _transformGrabPoint = _transform.ToImagePoint(position);
-            _transformGrabOffset = transform.Offset;
-            _pointerPosition = position;
+            BeginTransformDrag(position);
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -1005,6 +1048,17 @@ public sealed class PixelCanvasControl : Control, IDisposable
         _pointerPosition = position;
         _lastKeyModifiers = e.KeyModifiers;
         tool.OnPointerPressed(context, CreateToolArgs(position, _activeButton, e.KeyModifiers));
+
+        // A marking tool answers a press that lands on marked pixels by picking them up. It
+        // has no way to tell the canvas that, so the canvas asks afterwards — otherwise the
+        // artist would have to press a second time before the drag they already started took
+        // hold of anything.
+        if (_observedWorkspace?.ActiveTransform is not null)
+        {
+            _activeButton = ToolPointerButton.None;
+            BeginTransformDrag(position);
+        }
+
         e.Handled = true;
     }
 
@@ -1677,6 +1731,14 @@ public sealed class PixelCanvasControl : Control, IDisposable
         _observedWorkspace?.CommitTransform();
 
         HandOverActiveStroke(previous, tool);
+
+        // A tool that holds something between clicks — the crop frame — is told when it is
+        // picked up and put down, because nothing else knows.
+        if (ToolContext is { } context)
+        {
+            (previous as IInteractiveTool)?.OnDeactivated(context);
+            (tool as IInteractiveTool)?.OnActivated(context);
+        }
 
         _presentation = ToolPresentations.For(tool?.Id);
         UpdateCursor();

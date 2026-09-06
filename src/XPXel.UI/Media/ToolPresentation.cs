@@ -165,6 +165,10 @@ public static class ToolPresentations
             [RectangleSelectTool.ToolId] =
                 new(ToolIcons.Marquee, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "M"),
 
+            [PixelSelectTool.ToolId] =
+                new(ToolIcons.PixelSelect, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true,
+                    Shortcut: "K", Options: ToolOptions.Pencil),
+
             [CropTool.ToolId] =
                 new(ToolIcons.Crop, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "C"),
         };
