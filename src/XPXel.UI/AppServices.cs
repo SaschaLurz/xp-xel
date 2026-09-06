@@ -86,6 +86,7 @@ public static class AppServices
         services.AddSingleton<ITool, EllipseTool>();
         services.AddSingleton<ITool, TextTool>();
         services.AddSingleton<ITool, RectangleSelectTool>();
+        services.AddSingleton<ITool, CropTool>();
 
         services.AddSingleton<ToolRegistry>();
     }
@@ -177,6 +178,7 @@ public static class AppServices
         services.AddSingleton<TextPanelViewModel>();
         services.AddSingleton<TimelineViewModel>();
         services.AddSingleton<PreviewPanelViewModel>();
+        services.AddSingleton<HistoryPanelViewModel>();
         services.AddSingleton<MainViewModel>();
     }
 }

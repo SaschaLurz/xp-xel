@@ -213,13 +213,10 @@
               ToolTip.Tip="Add the primary colour to the palette" />
     </Grid>
 
-    <TextBlock Text="Press 1–9 or 0 to pick a numbered colour. Right-click any swatch to edit it."
-               Classes="subtle"
-               FontSize="11"
-               TextWrapping="Wrap"
-               Margin="8,0,8,0" />
-
-    <ScrollViewer MaxHeight="150" Margin="8,4,8,0">
+    <!-- The numbers are printed on the swatches themselves and right-clicking a swatch is
+         the ordinary way to edit anything in this application, so a paragraph explaining both
+         was telling the artist what they can already see. -->
+    <ScrollViewer MaxHeight="150" Margin="8,4,8,12">
       <ItemsControl ItemsSource="{Binding Swatches}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>

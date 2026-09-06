@@ -1,0 +1,76 @@
+<!--
+  The history panel.
+
+  Newest action at the top, because that is the end the artist is working at and the end they
+  reach for when something has just gone wrong. Clicking a row winds the document to that
+  point; undone rows stay in the list, dimmed, until a new action discards them, so an artist
+  who has gone too far back can see exactly what they are about to lose.
+
+  The depth limit lives in the footer rather than in a preferences dialog. It is the one
+  setting whose effect is visible in the panel it sits on, and it is a memory decision an
+  artist makes while looking at how much history they have.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.HistoryPanelView"
+             x:DataType="vm:HistoryPanelViewModel">
+
+  <UserControl.Styles>
+    <!-- A row that has been undone is still there and can still be returned to, so it is
+         dimmed rather than hidden. -->
+    <Style Selector="Button.historyEntry">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Padding" Value="8,3" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="3" />
+    </Style>
+
+    <Style Selector="Button.historyEntry.current">
+      <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
+    </Style>
+
+    <Style Selector="Button.historyEntry.undone">
+      <Setter Property="Opacity" Value="0.45" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid RowDefinitions="*,Auto">
+
+    <ScrollViewer Grid.Row="0" Margin="4,6,4,0">
+      <ItemsControl ItemsSource="{Binding Entries}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:HistoryEntryViewModel">
+            <Button Classes="historyEntry"
+                    Classes.current="{Binding IsCurrent}"
+                    Classes.undone="{Binding IsUndone}"
+                    Command="{Binding $parent[ItemsControl].((vm:HistoryPanelViewModel)DataContext).GoToCommand}"
+                    CommandParameter="{Binding}">
+              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="1" Margin="8,6,8,8" Spacing="4">
+      <TextBlock Text="{Binding DepthText}" Classes="subtle" />
+
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+        <TextBlock Grid.Column="0" Text="Keep last" Classes="subtle" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Column="1"
+                       Value="{Binding Capacity, Mode=TwoWay}"
+                       Minimum="1" Maximum="5000"
+                       Increment="10"
+                       FormatString="0"
+                       Width="96"
+                       ToolTip.Tip="How many actions to keep. Each one holds the pixels it changed, so a deeper history costs memory." />
+      </Grid>
+    </StackPanel>
+
+  </Grid>
+
+</UserControl>

@@ -191,7 +191,10 @@ public sealed class TextLayerTests
     {
         (DocumentWorkspace workspace, TextLayer layer, BlockRasterizer rasterizer) = CreateWorkspace();
         layer.Text = "keep";
-        layer.Style.FontSize = 12;
+
+        // Whole multiples of the pixel font's cell height, because that is what the default
+        // font can render exactly; anything between two of them is snapped to one.
+        layer.Style.FontSize = 8;
         TextLayerRenderer.Render(workspace.Document, layer, workspace.ActiveFrame, rasterizer);
 
         TextEditSession session = new(workspace, layer, rasterizer, isNewLayer: false);
@@ -202,7 +205,7 @@ public sealed class TextLayerTests
         workspace.CancelTextEdit();
 
         Assert.Equal("keep", layer.Text);
-        Assert.Equal(12, layer.Style.FontSize);
+        Assert.Equal(8, layer.Style.FontSize);
         Assert.False(workspace.History.CanUndo);
     }
 

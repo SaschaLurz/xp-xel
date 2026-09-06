@@ -109,6 +109,21 @@ public abstract class StrokeToolBase : ITool
     protected virtual bool SupportsBrushDynamics => false;
 
     /// <summary>
+    /// Returns the footprint this tool stamps. Defaults to whatever shape the artist chose.
+    /// </summary>
+    /// <param name="context">The document and settings being acted on.</param>
+    /// <returns>The brush shape to stamp with.</returns>
+    /// <remarks>
+    /// Overridden by the pencil, which is square whatever the setting says; see
+    /// <see cref="PencilTool"/> for why that is a promise rather than a limitation.
+    /// </remarks>
+    protected virtual BrushShape ResolveBrushShape(ToolContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.Settings.BrushShape;
+    }
+
+    /// <summary>
     /// Returns the colour this tool lays down for the given button. The pencil returns a
     /// drawing colour; the eraser returns transparent.
     /// </summary>
@@ -174,7 +189,7 @@ public abstract class StrokeToolBase : ITool
         _session = session;
         _color = ResolveStrokeColor(context, e.Button);
         _brushSize = context.Settings.BrushSize;
-        _brushShape = context.Settings.BrushShape;
+        _brushShape = ResolveBrushShape(context);
         _softness = dynamics ? context.Settings.BrushSoftness / 100.0 : 0.0;
         _stabilization = dynamics ? context.Settings.BrushStabilization / 100.0 : 0.0;
         _stampBrush = StampAt;

@@ -29,14 +29,16 @@
            ============================================================================ -->
       <StackPanel Spacing="4" IsVisible="{Binding HasTarget}">
         <TextBlock Text="TEXT" Classes="panelHeader" Margin="0" />
-        <!-- LostFocus rather than PropertyChanged: committing on every keystroke would put
-             one undo entry in the history per letter typed into this box. Typing on the
-             canvas is the fast path and does its own thing; this box is for corrections. -->
-        <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+        <!-- PropertyChanged, so the canvas follows the typing rather than sitting unchanged
+             until the artist clicks away and wonders whether the box works at all. The undo
+             history is kept sane by the view model, which opens one editing session for the
+             whole burst and closes it when this box loses focus. -->
+        <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                  AcceptsReturn="True"
                  TextWrapping="Wrap"
                  MinHeight="56"
-                 MaxHeight="120" />
+                 MaxHeight="120"
+                 LostFocus="OnTextLostFocus" />
       </StackPanel>
 
       <!-- ============================================================================
@@ -50,17 +52,25 @@
 
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
           <ComboBox Grid.Column="0"
-                    ItemsSource="{x:Static vm:TextPanelViewModel.FontSizes}"
+                    ItemsSource="{Binding AvailableFontSizes}"
                     SelectedItem="{Binding FontSize, Mode=TwoWay}"
                     HorizontalAlignment="Stretch"
                     ToolTip.Tip="Font size in pixels" />
           <NumericUpDown Grid.Column="1"
                          Value="{Binding FontSize, Mode=TwoWay}"
-                         Minimum="4" Maximum="512" Increment="1"
+                         Minimum="{Binding MinimumFontSize}" Maximum="512" Increment="1"
                          FormatString="0.##"
                          ShowButtonSpinner="False"
                          Width="58" />
         </Grid>
+
+        <TextBlock Classes="subtle" TextWrapping="Wrap"
+                   IsVisible="{Binding IsPixelFont}"
+                   Text="Drawn as pixels, so it is exactly legible at every size offered. Sizes are whole multiples of the 8-pixel cell." />
+
+        <TextBlock Classes="subtle" TextWrapping="Wrap"
+                   IsVisible="{Binding !IsPixelFont}"
+                   Text="A system font. It will not hold together much below 10 pixels, which is why smaller sizes are not offered — use the pixel font for those." />
       </StackPanel>
 
       <!-- ============================================================================

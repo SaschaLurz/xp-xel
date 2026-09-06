@@ -106,6 +106,18 @@
   <!-- A vector glyph used as the whole content of a small square button.
        Bound to the button's own foreground so the icon dims along with the button when its
        command is unavailable, which a hard-coded brush would not do. -->
+  <!-- A number in the status bar. Fixed width so the readout does not re-flow as the value
+       changes width, which at pointer speed reads as the whole status bar twitching. -->
+  <Style Selector="Border.statusValue">
+    <Setter Property="MinWidth" Value="34" />
+    <Setter Property="Padding" Value="4,1" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource XpAppBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource XpPanelBorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
   <Style Selector="Button Path.buttonIcon">
     <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />
     <Setter Property="StrokeThickness" Value="1.3" />

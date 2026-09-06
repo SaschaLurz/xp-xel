@@ -73,6 +73,14 @@ from a single codebase.
 - **The drawing colour follows the pointer** as a small round dot attached to the cursor
   itself, so you can see what a stroke will lay down without looking away from the canvas.
   **View → Show Colour by the Cursor** turns it off.
+- **Text is drawn with a font built for pixel art.** The default font ships inside XP-xel and
+  is made of pixels rather than outlines, so at every size it offers it is exactly crisp and
+  exactly legible — no smoothing to clean up, and the same on every machine. The system fonts
+  are still there for larger type, held at ten pixels and above, which is where they stop
+  holding together without anti-aliasing.
+- **The History panel** lists what you have done and takes you back to any of it in one click.
+  How many actions to keep is yours to set, in the panel's footer — each one holds the pixels
+  it changed, so the depth is a trade between memory and regret.
 - **Your work is backed up every three minutes.** The last three copies of every open document
   are kept as ordinary project files in a folder you can open from the File menu, so a crash
   costs minutes rather than an afternoon. A backup never touches your own file: recovering is
@@ -116,6 +124,7 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Bucket fill / colour picker | `G` / `I` |
 | Line / rectangle / ellipse | `L` / `R` / `O` |
 | Text / rectangular marquee | `T` / `M` |
+| Crop | `C`, then drag the part to keep |
 | Draw | Left mouse button |
 | Open the active tool's settings | Right-click the canvas |
 | Pan the canvas | Hold `Space` and drag, or middle mouse button drag |
@@ -134,6 +143,8 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Change tool without letting go | Press the new tool's key mid-stroke |
 | Move the selected pixels | `Ctrl` `T`, then drag or use the arrow keys; `Enter` places them, `Escape` puts them back |
 | Show or hide the pixel grid | The **Grid** box on the options bar, or the View menu |
+| Change how far one zoom step travels | The **Zoom speed** slider on the options bar |
+| Go back several steps at once | Click that point in the History panel |
 | Select all / deselect / invert the selection | `Ctrl` `A` / `Ctrl` `D` / `Ctrl` `Shift` `I` |
 | Crop or enlarge the canvas | `Ctrl` `Alt` `C` |
 | Finish a piece of text | Click elsewhere on the canvas, or pick another tool |

@@ -52,6 +52,18 @@ public static class ToolCursors
     /// <summary>The middle of a cursor bitmap, which is where a crosshair's hotspot goes.</summary>
     private const int Center = 12;
 
+    /// <summary>
+    /// The side of the bitmap used for the crosshair that carries a colour dot.
+    /// </summary>
+    /// <remarks>
+    /// Larger than the icon cursors because the dot is held well away from the hotspot, and
+    /// the whole thing — crosshair, gap and dot — has to fit inside one bitmap.
+    /// </remarks>
+    private const int DottedSize = 40;
+
+    /// <summary>Where the hotspot sits in that larger bitmap.</summary>
+    private const int DottedCenter = 14;
+
     private static readonly Dictionary<string, Cursor> IconCursors = new(StringComparer.Ordinal);
 
     private static Cursor? _crosshair;
@@ -105,7 +117,7 @@ public static class ToolCursors
     {
         try
         {
-            using RenderTargetBitmap bitmap = new(new PixelSize(Size, Size), new Vector(96, 96));
+            using RenderTargetBitmap bitmap = new(new PixelSize(DottedSize, DottedSize), new Vector(96, 96));
 
             using (DrawingContext context = bitmap.CreateDrawingContext())
             {
@@ -113,7 +125,7 @@ public static class ToolCursors
                 DrawColorDot(context, color);
             }
 
-            return new Cursor(bitmap, new PixelPoint(Center, Center));
+            return new Cursor(bitmap, new PixelPoint(DottedCenter, DottedCenter));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -126,7 +138,7 @@ public static class ToolCursors
     {
         // Half a pixel off the hotspot, so a one-pixel line covers one row of pixels
         // completely rather than two of them faintly.
-        const double middle = Center - 0.5;
+        const double middle = DottedCenter - 0.5;
         const double gap = 2.5;
         const double arm = 9.0;
 
@@ -151,21 +163,28 @@ public static class ToolCursors
         }
     }
 
-    /// <summary>Draws the colour itself, as a round dot beside the cross.</summary>
+    /// <summary>Draws the colour itself, as a bare round dot up and to the right of the cross.</summary>
+    /// <remarks>
+    /// <para>
+    /// Up and to the right, and far enough out that it is clear of the crosshair's arms
+    /// entirely. Held close it competes with the pixel being aimed at; held out here it reads
+    /// as a label attached to the pointer, which is what it is.
+    /// </para>
+    /// <para>
+    /// <b>No outline, by request.</b> The trade is real and worth stating: a bare dot is the
+    /// colour and nothing else, which is exactly what makes it unmistakable — and which also
+    /// means it disappears against artwork of its own colour. The white backing is kept, so a
+    /// partly transparent colour still reads as a pale version of itself rather than as
+    /// whatever lies behind the pointer.
+    /// </para>
+    /// </remarks>
     private static void DrawColorDot(DrawingContext context, PixelColor color)
     {
-        Point middle = new(18.0, 18.0);
-        const double radius = 4.0;
+        Point middle = new(DottedCenter + 13.0, DottedCenter - 11.0);
+        const double radius = 2.75;
 
-        // White underneath the colour, so a partly transparent one reads as a pale version of
-        // itself instead of as whatever artwork happens to lie behind the pointer.
         context.DrawEllipse(Brushes.White, null, middle, radius, radius);
         context.DrawEllipse(new SolidColorBrush(color.ToAvalonia()), null, middle, radius, radius);
-
-        // The same two-pen halo as the cross, and for the same reason: a dot of the colour
-        // being painted is otherwise invisible over artwork already painted in it.
-        context.DrawEllipse(null, new Pen(Brushes.White, 2.5), middle, radius, radius);
-        context.DrawEllipse(null, new Pen(Brushes.Black, 1.0), middle, radius, radius);
     }
 
     private static Cursor GetIconCursor(ToolPresentation presentation)

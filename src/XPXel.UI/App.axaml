@@ -66,6 +66,10 @@
       <views:PreviewPanelView />
     </DataTemplate>
 
+    <DataTemplate DataType="vm:HistoryPanelViewModel">
+      <views:HistoryPanelView />
+    </DataTemplate>
+
     <DataTemplate DataType="dialogs:ConfirmDialogViewModel">
       <views:ConfirmDialogView />
     </DataTemplate>

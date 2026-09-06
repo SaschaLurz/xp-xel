@@ -49,23 +49,87 @@ public sealed class TextStyle : ObservableModel
     private PixelColor _color = PixelColor.Black;
 
     /// <summary>
-    /// The font used when none has been chosen. A generic family name rather than a specific
-    /// font, so that every platform resolves it to something that exists.
+    /// The font used when none has been chosen: the one built into the application.
     /// </summary>
-    public const string DefaultFontFamily = "Monospace";
+    /// <remarks>
+    /// A pixel editor cannot default to a system font. Asked for sprite-sized text with the
+    /// smoothing off, an outline face designed for paragraphs loses whole strokes and turns
+    /// different letters into the same shape. The built-in font is drawn as pixels, so at every
+    /// size it offers it is exactly legible. See <see cref="PixelFont"/>.
+    /// </remarks>
+    public const string DefaultFontFamily = PixelFont.FamilyName;
+
+    /// <summary>
+    /// The smallest a system font may be set to.
+    /// </summary>
+    /// <remarks>
+    /// Below about ten pixels an outline font rendered without anti-aliasing stops being text:
+    /// the stems of adjacent letters merge and the counters fill in. Rather than let an artist
+    /// choose a size that cannot be read and leave them wondering what is wrong with the tool,
+    /// the size is held at the floor — and the built-in pixel font, which has no such floor,
+    /// is what the editor offers for anything smaller.
+    /// </remarks>
+    public const double MinimumSystemFontSize = 10.0;
+
+    /// <summary>The largest any font may be set to.</summary>
+    public const double MaximumFontSize = 512.0;
 
     /// <summary>The font family name, for example <c>"Consolas"</c>.</summary>
     public string FontFamily
     {
         get => _fontFamily;
-        set => SetProperty(ref _fontFamily, string.IsNullOrWhiteSpace(value) ? DefaultFontFamily : value);
+        set
+        {
+            string resolved = string.IsNullOrWhiteSpace(value) ? DefaultFontFamily : value;
+
+            if (SetProperty(ref _fontFamily, resolved))
+            {
+                // The two families have different rules about what sizes mean, so a size that
+                // was legal for one may not be for the other. Re-running the clamp is what
+                // stops switching from the pixel font to a system font at 8 pixels leaving
+                // behind text nobody can read.
+                FontSize = _fontSize;
+            }
+        }
     }
 
-    /// <summary>The font size in pixels, clamped to a usable range.</summary>
+    /// <summary>
+    /// The font size in pixels, clamped to what the chosen family can actually render.
+    /// </summary>
+    /// <remarks>
+    /// The built-in pixel font is snapped to whole multiples of its cell height, because a
+    /// bitmap font at a fractional scale has to drop or double single rows and comes out
+    /// visibly lopsided. A system font is held at or above
+    /// <see cref="MinimumSystemFontSize"/>; see there for why.
+    /// </remarks>
     public double FontSize
     {
         get => _fontSize;
-        set => SetProperty(ref _fontSize, Math.Clamp(value, 4.0, 512.0));
+        set => SetProperty(ref _fontSize, ClampFontSize(value, _fontFamily));
+    }
+
+    /// <summary>Gets a value indicating whether this style uses the built-in pixel font.</summary>
+    public bool UsesPixelFont => PixelFont.IsBuiltIn(_fontFamily);
+
+    /// <summary>Returns the smallest size a family may be set to.</summary>
+    /// <param name="fontFamily">The family to ask about.</param>
+    /// <returns>The minimum size in pixels.</returns>
+    public static double GetMinimumFontSize(string? fontFamily) =>
+        PixelFont.IsBuiltIn(fontFamily) ? PixelFont.CellHeight : MinimumSystemFontSize;
+
+    /// <summary>Brings a size within what a family can render.</summary>
+    /// <param name="size">The size asked for.</param>
+    /// <param name="fontFamily">The family it will be rendered with.</param>
+    /// <returns>A size that family can render exactly.</returns>
+    public static double ClampFontSize(double size, string? fontFamily)
+    {
+        if (!PixelFont.IsBuiltIn(fontFamily))
+        {
+            return Math.Clamp(size, MinimumSystemFontSize, MaximumFontSize);
+        }
+
+        double steps = Math.Round(size / PixelFont.CellHeight, MidpointRounding.AwayFromZero);
+        return Math.Clamp(steps * PixelFont.CellHeight, PixelFont.CellHeight, MaximumFontSize);
     }
 
     /// <summary>Whether the text is drawn in a bold weight.</summary>

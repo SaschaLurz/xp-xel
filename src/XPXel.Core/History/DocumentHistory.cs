@@ -29,8 +29,21 @@ public sealed class DocumentHistory
     /// <summary>The number of history entries retained by default.</summary>
     public const int DefaultCapacity = 250;
 
+    /// <summary>The smallest capacity that still leaves undo worth having.</summary>
+    public const int MinimumCapacity = 1;
+
+    /// <summary>
+    /// The largest capacity that may be set.
+    /// </summary>
+    /// <remarks>
+    /// A ceiling rather than a recommendation. Each raster entry holds a copy of the pixels it
+    /// changed, so a thousand full-canvas fills on a large document is real memory; the limit
+    /// stops a typed number turning into an out-of-memory crash three hours into a session.
+    /// </remarks>
+    public const int MaximumCapacity = 5000;
+
     private readonly List<IUndoableCommand> _commands = [];
-    private readonly int _capacity;
+    private int _capacity;
     private int _cursor;
     private int _savedCursor;
 
@@ -42,8 +55,8 @@ public sealed class DocumentHistory
     /// </param>
     public DocumentHistory(int capacity = DefaultCapacity)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
-        _capacity = capacity;
+        ArgumentOutOfRangeException.ThrowIfLessThan(capacity, MinimumCapacity);
+        _capacity = Math.Min(capacity, MaximumCapacity);
     }
 
     /// <summary>
@@ -66,6 +79,87 @@ public sealed class DocumentHistory
 
     /// <summary>The number of entries currently retained, applied and undone together.</summary>
     public int Count => _commands.Count;
+
+    /// <summary>
+    /// How many entries are kept before the oldest are discarded.
+    /// </summary>
+    /// <remarks>
+    /// Settable, because how far back an artist wants to be able to go is a judgement about
+    /// their machine and their working style rather than something this class can know.
+    /// Lowering it trims immediately: a limit that only applied to future entries would leave
+    /// the artist wondering why the memory they were trying to reclaim had not come back.
+    /// </remarks>
+    public int Capacity
+    {
+        get => _capacity;
+        set
+        {
+            int clamped = Math.Clamp(value, MinimumCapacity, MaximumCapacity);
+
+            if (clamped == _capacity)
+            {
+                return;
+            }
+
+            _capacity = clamped;
+
+            if (TrimToCapacity())
+            {
+                Changed?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The recorded actions, oldest first. Entries before <see cref="Position"/> have been
+    /// applied; entries from it onwards have been undone.
+    /// </summary>
+    public IReadOnlyList<IUndoableCommand> Commands => _commands;
+
+    /// <summary>
+    /// How many entries have been applied, which is where the cursor sits in
+    /// <see cref="Commands"/>.
+    /// </summary>
+    public int Position => _cursor;
+
+    /// <summary>
+    /// Winds the document to a given position in the history, undoing or redoing as needed.
+    /// </summary>
+    /// <param name="position">
+    /// How many entries should be applied. Zero is the state before the oldest retained entry.
+    /// </param>
+    /// <returns><see langword="true"/> if anything moved.</returns>
+    /// <remarks>
+    /// This is what makes a history panel a navigator rather than a list: clicking an entry
+    /// three steps back is Ctrl+Z three times, and the artist should not have to count. The
+    /// steps are replayed one at a time through the same <see cref="IUndoableCommand"/> calls
+    /// as undo and redo, so nothing here can get out of step with them.
+    /// </remarks>
+    public bool MoveTo(int position)
+    {
+        int target = Math.Clamp(position, 0, _commands.Count);
+
+        if (target == _cursor)
+        {
+            return false;
+        }
+
+        while (_cursor > target)
+        {
+            _cursor--;
+            _commands[_cursor].Undo();
+        }
+
+        while (_cursor < target)
+        {
+            _commands[_cursor].Redo();
+            _cursor++;
+        }
+
+        Revision++;
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
 
     /// <summary>
     /// Gets a value indicating whether the document is in the same state it was in when
@@ -175,12 +269,27 @@ public sealed class DocumentHistory
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    private void TrimToCapacity()
+    /// <summary>Discards the oldest entries beyond the capacity.</summary>
+    /// <returns><see langword="true"/> if anything was discarded.</returns>
+    /// <remarks>
+    /// Only entries that have been applied are dropped. Trimming from the front never touches
+    /// anything the artist could still redo, because those sit at the far end of the list.
+    /// </remarks>
+    private bool TrimToCapacity()
     {
         int excess = _commands.Count - _capacity;
         if (excess <= 0)
         {
-            return;
+            return false;
+        }
+
+        // Never trim past the cursor: doing so would drop entries that have been undone and
+        // are still waiting to be redone, and the artist would watch their redo stack vanish.
+        excess = Math.Min(excess, _cursor);
+
+        if (excess <= 0)
+        {
+            return false;
         }
 
         _commands.RemoveRange(0, excess);
@@ -189,5 +298,6 @@ public sealed class DocumentHistory
         // Once the saved position falls off the front we can no longer prove the document
         // matches what is on disk, so report it as modified from here on.
         _savedCursor = _savedCursor >= excess ? _savedCursor - excess : -1;
+        return true;
     }
 }

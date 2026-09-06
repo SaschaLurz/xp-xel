@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -102,7 +103,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ColorSlots colors,
         AnimationExportService animationExport,
         AnimationExportRegistry animationFormats,
-        AutosaveService autosave)
+        AutosaveService autosave,
+        HistoryPanelViewModel history)
     {
         ArgumentNullException.ThrowIfNull(toolbox);
         ArgumentNullException.ThrowIfNull(layers);
@@ -121,6 +123,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(animationExport);
         ArgumentNullException.ThrowIfNull(animationFormats);
         ArgumentNullException.ThrowIfNull(autosave);
+        ArgumentNullException.ThrowIfNull(history);
 
         Toolbox = toolbox;
         Layers = layers;
@@ -140,10 +143,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         Timeline = timeline;
         Preview = preview;
+        History = history;
 
         Toolbox.PropertyChanged += OnToolboxPropertyChanged;
 
-        _factory = new XpDockFactory(toolbox, layers, palette, brushPanel, textPanel, timeline, preview);
+        _factory = new XpDockFactory(toolbox, layers, palette, brushPanel, textPanel, timeline, preview, history);
         _factory.ActiveDockableChanged += OnActiveDockableChanged;
 
         // Closing a panel with the x on its tab, or dragging it out and shutting the window,
@@ -182,6 +186,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>The animation preview.</summary>
     public PreviewPanelViewModel Preview { get; }
+
+    /// <summary>The undo history, and the depth limit that governs it.</summary>
+    public HistoryPanelViewModel History { get; }
 
     /// <summary>
     /// One checkable entry per panel for the View menu, showing which are on screen.
@@ -244,6 +251,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             TextPanel.Attach(_activeDocument?.Workspace);
             Timeline.Attach(_activeDocument?.Workspace);
             Preview.Attach(_activeDocument?.Workspace);
+            History.Attach(_activeDocument?.Workspace);
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(Workspace));
@@ -251,6 +259,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(DocumentSizeText));
             OnPropertyChanged(nameof(ZoomText));
             OnPropertyChanged(nameof(HoveredPixelText));
+            OnPropertyChanged(nameof(HoveredXText));
+            OnPropertyChanged(nameof(HoveredYText));
             NotifyEditabilityChanged();
             UpdateHistoryCommands();
             NotifyDocumentCommands();
@@ -309,8 +319,26 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     public string HoveredPixelText =>
         ActiveDocument?.HoveredPixel is { } point ? $"x {point.X + 1}, y {point.Y + 1}" : "x —, y —";
 
+    /// <summary>The pointer's column, for the status bar's own box.</summary>
+    /// <remarks>
+    /// Split from <see cref="HoveredPixelText"/> and shown in a fixed-width box because a
+    /// single run of text re-flows as the numbers change width: going from 9 to 10 shunts the
+    /// y label sideways, and at drawing speed the whole readout appears to twitch. Two boxes
+    /// wide enough for the numbers they will hold do not move at all.
+    /// </remarks>
+    public string HoveredXText => Format(ActiveDocument?.HoveredPixel?.X);
+
+    /// <summary>The pointer's row, for the status bar's own box.</summary>
+    public string HoveredYText => Format(ActiveDocument?.HoveredPixel?.Y);
+
     /// <summary>The current zoom for the status bar, as a percentage.</summary>
     public string ZoomText => $"{(ActiveDocument?.Zoom ?? 1.0) * 100:F0}%";
+
+    /// <summary>
+    /// Renders one coordinate for the status bar, counting from one the way the rulers do.
+    /// </summary>
+    private static string Format(int? coordinate) =>
+        coordinate is { } value ? (value + 1).ToString(CultureInfo.CurrentCulture) : "—";
 
     /// <summary>
     /// Why the drawing tools would currently do nothing, or an empty string when they will
@@ -376,6 +404,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         Layers.Dispose();
         Palette.Dispose();
         TextPanel.Dispose();
+        History.Dispose();
         BrushPanel.Dispose();
         Timeline.Dispose();
         Preview.Dispose();
@@ -1099,6 +1128,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
             case nameof(EditorDocument.HoveredPixel):
                 OnPropertyChanged(nameof(HoveredPixelText));
+                OnPropertyChanged(nameof(HoveredXText));
+                OnPropertyChanged(nameof(HoveredYText));
                 break;
 
             case nameof(EditorDocument.Title):

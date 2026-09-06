@@ -18,7 +18,7 @@ public enum ToolOptions
     /// <summary>The tool has no settings of its own.</summary>
     None = 0,
 
-    /// <summary>Brush size, shape, softness and stabilisation.</summary>
+    /// <summary>Brush size and shape.</summary>
     Brush = 1,
 
     /// <summary>Whether a shape is filled or outlined.</summary>
@@ -29,6 +29,20 @@ public enum ToolOptions
 
     /// <summary>The default typeface, size and emphasis for new text.</summary>
     Text = 8,
+
+    /// <summary>
+    /// The tool honours softness and stabilisation. Deliberately separate from
+    /// <see cref="Brush"/>, because showing a tool a slider it will not obey is worse than
+    /// showing it nothing at all.
+    /// </summary>
+    Dynamics = 16,
+
+    /// <summary>
+    /// The tool takes a size but is always a hard square. Only the pencil, and it is its own
+    /// flag rather than <see cref="Brush"/> minus <see cref="Dynamics"/> because the shape
+    /// chooser has to disappear for it too.
+    /// </summary>
+    Pencil = 32,
 }
 
 /// <summary>How a tool's pointer should look while that tool is active.</summary>
@@ -113,15 +127,15 @@ public static class ToolPresentations
         {
             [PencilTool.ToolId] =
                 new(ToolIcons.Pencil, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "Q",
-                    Options: ToolOptions.Brush, ShowsColorSwatch: true),
+                    Options: ToolOptions.Pencil, ShowsColorSwatch: true),
 
             [BrushTool.ToolId] =
                 new(ToolIcons.Brush, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "B",
-                    Options: ToolOptions.Brush, ShowsColorSwatch: true),
+                    Options: ToolOptions.Brush | ToolOptions.Dynamics, ShowsColorSwatch: true),
 
             [EraserTool.ToolId] =
                 new(ToolIcons.Eraser, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "E",
-                    Options: ToolOptions.Brush),
+                    Options: ToolOptions.Brush | ToolOptions.Dynamics),
 
             // The bucket's hotspot is the lip the paint pours from, not the middle of the pot.
             [BucketFillTool.ToolId] =
@@ -150,6 +164,9 @@ public static class ToolPresentations
 
             [RectangleSelectTool.ToolId] =
                 new(ToolIcons.Marquee, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "M"),
+
+            [CropTool.ToolId] =
+                new(ToolIcons.Crop, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "C"),
         };
 
     /// <summary>Looks up how a tool should be presented.</summary>

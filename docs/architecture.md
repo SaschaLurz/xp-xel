@@ -239,6 +239,14 @@ dragged, the artist gets one "Move Selection" in the Edit menu. The marquee is m
 pixels as a `SetSelectionCommand` inside the same composite, so an undo does not leave it
 stranded over the hole the artwork used to fill.
 
+**The history is a list plus a cursor, which is what makes a history panel possible.**
+`MoveTo` winds the document to any position by replaying the same `Undo` and `Redo` calls one
+at a time, so nothing the panel does can get out of step with Ctrl+Z. Its depth is settable
+rather than fixed, because how far back to keep is a trade between memory and regret that only
+the artist can make; lowering it trims immediately, since a limit that applied only to future
+work would look like it had done nothing. Trimming never crosses the cursor — dropping entries
+that have been undone would take away a redo stack the artist has not finished deciding about.
+
 **`DocumentHistory.Revision` counts movements, not states.** It exists for autosave, which has
 to distinguish "nothing has happened since the last backup" from "something happened and was
 undone" — the document looks identical either way, and only the first means there is nothing
@@ -636,7 +644,37 @@ text layer being typed on the canvas, since the second has no focused text box a
 handler is attached to the top level rather than to `MainView`, because immediately after
 launch nothing inside the shell has focus and an overridden `OnKeyDown` would never run.
 
-### 6.5 Colour
+### 6.5 Text
+
+**The default font is built into the application**, and that is not a convenience. Every
+outline font on the machine is designed to be rendered with anti-aliasing at paragraph sizes.
+Asked for seven pixels of cap height with the smoothing off — which is what a sprite needs —
+they lose whole strokes, fill in their counters, and render different letters as the same
+shape. `PixelFont` is drawn as pixels instead, so there is nothing to approximate: at 1× it is
+what was drawn, and at any whole multiple it is that again, scaled by whole pixels.
+
+It lives in Core with `PixelFontRasterizer`, which means text renders identically on every
+platform, renders in the browser, renders in unit tests with no display attached, and renders
+on a machine that lacks the fonts a project was authored with. `AvaloniaTextRasterizer` hands
+every call straight over when the style names the built-in font, and only reaches for Avalonia's
+text stack for the system faces.
+
+Two rules keep text readable rather than merely rendered:
+
+- **The pixel font's sizes are whole multiples of its cell.** A bitmap font at 1.6× would have
+  to drop or double single rows and would come out visibly lopsided, so a size between two
+  multiples is snapped to one rather than honoured approximately.
+- **A system font may not be set below ten pixels.** Below that an outline face rendered without
+  anti-aliasing stops being text. Rather than let an artist choose a size that cannot be read
+  and leave them wondering what is wrong with the tool, the size is held at the floor and the
+  pixel font is what the editor offers for anything smaller.
+
+The glyph table is written as pictures rather than as hexadecimal, because a font is the one
+kind of data whose source should look like the thing it describes. A test asserts that no two
+characters render identically, which is the one font bug — a mistyped row — that is otherwise
+invisible until an artist writes a word containing both.
+
+### 6.6 Colour
 
 `ColorHarmony` and `HsvColor` live in Core rather than the UI, because suggesting the colours
 that go with a colour is arithmetic with no view concepts in it and is worth testing without a
@@ -665,7 +703,7 @@ swatch was clicked. Because it is shared it cannot bind its way to the editor vi
 is shown against a swatch, whose data context is that swatch — so the code-behind assigns it
 when the editor is pointed at something.
 
-### 6.6 View models and dialogs
+### 6.7 View models and dialogs
 
 MVVM with **CommunityToolkit.Mvvm**, chosen over ReactiveUI because its
 `[ObservableProperty]` and `[RelayCommand]` are compile-time source generators with no
@@ -676,7 +714,7 @@ Dialogs are **overlays inside the shell**, not child windows, because the browse
 child windows. One implementation therefore behaves identically everywhere. A dialog exposes
 its result as a `Task`, so calling code reads as a straight line rather than as callbacks.
 
-### 6.7 Theming
+### 6.8 Theming
 
 Every colour in the application comes from semantic tokens in `Themes/Tokens.axaml`, defined
 once per theme variant. No view names a literal colour. `IThemeService` only switches the
@@ -684,7 +722,7 @@ variant; setting it to `Default` makes Avalonia resolve the theme from the opera
 and update live when the OS setting changes. Adding a high-contrast or custom theme is a
 resource dictionary, not a code change.
 
-### 6.8 Composition
+### 6.9 Composition
 
 `AppServices` is the composition root and is the extension point for most new features. A
 new tool, format or panel is a class plus one line there. Registration order is deliberately

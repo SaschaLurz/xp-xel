@@ -86,6 +86,7 @@ public sealed class XpDockFactory : Factory
     /// <param name="text">The text panel.</param>
     /// <param name="timeline">The timeline panel.</param>
     /// <param name="preview">The animation preview panel.</param>
+    /// <param name="history">The undo history panel.</param>
     public XpDockFactory(
         ToolboxViewModel toolbox,
         LayersViewModel layers,
@@ -93,7 +94,8 @@ public sealed class XpDockFactory : Factory
         BrushPanelViewModel brush,
         TextPanelViewModel text,
         TimelineViewModel timeline,
-        PreviewPanelViewModel preview)
+        PreviewPanelViewModel preview,
+        HistoryPanelViewModel history)
     {
         ArgumentNullException.ThrowIfNull(toolbox);
         ArgumentNullException.ThrowIfNull(layers);
@@ -102,6 +104,7 @@ public sealed class XpDockFactory : Factory
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(timeline);
         ArgumentNullException.ThrowIfNull(preview);
+        ArgumentNullException.ThrowIfNull(history);
 
         Definitions =
         [
@@ -111,6 +114,7 @@ public sealed class XpDockFactory : Factory
             new PanelDefinition("Layers", "Layers", layers, RightTopDockId, Alignment.Right),
             new PanelDefinition("Colour", "Colour", palette, RightBottomDockId, Alignment.Right),
             new PanelDefinition("Preview", "Preview", preview, RightBottomDockId, Alignment.Right),
+            new PanelDefinition("History", "History", history, RightTopDockId, Alignment.Right),
             new PanelDefinition("Timeline", "Timeline", timeline, BottomDockId, Alignment.Bottom),
         ];
     }

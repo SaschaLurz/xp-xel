@@ -67,6 +67,9 @@ public static class ToolIcons
         "M21 18 L21 21 L18 21 M14 21 L10 21 M6 21 L3 21 L3 18 M3 14 L3 12";
 
     /// <summary>A question mark, shown for a tool with no icon of its own.</summary>
+    /// <summary>A crop frame: two overlapping corner brackets, the printer's mark for it.</summary>
+    public const string Crop = "M7 2 L7 17 L22 17 M2 7 L17 7 L17 22";
+
     public const string Unknown =
         "M9 8 A3 3 0 1 1 12 12 L12 15 M12 19 L12 19.01";
 

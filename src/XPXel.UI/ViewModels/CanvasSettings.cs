@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using XPXel.Core.Animation;
+using XPXel.UI.Rendering;
 
 namespace XPXel.UI.ViewModels;
 
@@ -55,6 +56,16 @@ public sealed partial class CanvasSettings : ObservableObject
     /// </remarks>
     [ObservableProperty]
     private bool _showColorSwatchCursor = true;
+
+    /// <summary>How far one zoom step travels, where 1 is the default.</summary>
+    /// <remarks>
+    /// A setting rather than a constant because there is no one right answer: someone drawing
+    /// a 16×16 icon lives between 8× and 32× and wants to creep, while someone working on a
+    /// 512-pixel background wants to cross the whole range in a few notches. It is a
+    /// multiplier on the step rather than a scale, so it means the same thing at every zoom.
+    /// </remarks>
+    [ObservableProperty]
+    private double _zoomSpeed = CanvasViewTransform.DefaultZoomSpeed;
 
     /// <summary>
     /// How the neighbouring frames are ghosted under the current one.

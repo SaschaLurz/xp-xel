@@ -100,7 +100,18 @@ public sealed partial class ToolboxViewModel : ViewModelBase
     public string ActiveToolName => SelectedTool?.DisplayName ?? "No tool";
 
     /// <summary>Gets a value indicating whether the brush settings apply to the active tool.</summary>
-    public bool ShowsBrushOptions => HasOption(ToolOptions.Brush);
+    public bool ShowsBrushOptions => HasOption(ToolOptions.Brush) || HasOption(ToolOptions.Pencil);
+
+    /// <summary>Gets a value indicating whether the active tool lets its shape be chosen.</summary>
+    public bool ShowsBrushShapeOption => HasOption(ToolOptions.Brush);
+
+    /// <summary>
+    /// Gets a value indicating whether the active tool honours softness and stabilisation.
+    /// </summary>
+    public bool ShowsBrushDynamics => HasOption(ToolOptions.Dynamics);
+
+    /// <summary>Gets a value indicating whether the active tool is the always-square pencil.</summary>
+    public bool IsPencilActive => HasOption(ToolOptions.Pencil);
 
     /// <summary>Gets a value indicating whether the shape fill setting applies to the active tool.</summary>
     public bool ShowsShapeOptions => HasOption(ToolOptions.Shape);
@@ -151,6 +162,9 @@ public sealed partial class ToolboxViewModel : ViewModelBase
         OnPropertyChanged(nameof(ActiveTool));
         OnPropertyChanged(nameof(ActiveToolName));
         OnPropertyChanged(nameof(ShowsBrushOptions));
+        OnPropertyChanged(nameof(ShowsBrushShapeOption));
+        OnPropertyChanged(nameof(ShowsBrushDynamics));
+        OnPropertyChanged(nameof(IsPencilActive));
         OnPropertyChanged(nameof(ShowsShapeOptions));
         OnPropertyChanged(nameof(ShowsFillOptions));
         OnPropertyChanged(nameof(ShowsTextOptions));

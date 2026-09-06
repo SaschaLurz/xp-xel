@@ -67,6 +67,7 @@
                                  ActiveTool="{Binding Toolbox.ActiveTool}"
                                  ShowPixelGrid="{Binding CanvasSettings.ShowPixelGrid}"
                                  ShowColorSwatch="{Binding CanvasSettings.ShowColorSwatchCursor}"
+                                 ZoomSpeed="{Binding CanvasSettings.ZoomSpeed}"
                                  OnionSkin="{Binding CanvasSettings.OnionSkin}"
                                  Zoom="{Binding Zoom, Mode=TwoWay}"
                                  HoveredPixel="{Binding HoveredPixel, Mode=TwoWay}"
@@ -118,7 +119,9 @@
                            VerticalAlignment="Center" />
               </Grid>
 
-              <Grid ColumnDefinitions="Auto,*">
+              <!-- The pencil is square by definition and reads neither of the two sliders
+                   below, so with it selected this panel offers a size and nothing else. -->
+              <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding Toolbox.ShowsBrushShapeOption}">
                 <TextBlock Grid.Column="0" Text="Shape" Classes="subtle" VerticalAlignment="Center" />
                 <ComboBox Grid.Column="1" Margin="8,0,0,0"
                           HorizontalAlignment="Stretch"
@@ -126,7 +129,7 @@
                           SelectedItem="{Binding Toolbox.ToolSettings.BrushShape, Mode=TwoWay}" />
               </Grid>
 
-              <Grid ColumnDefinitions="Auto,*,Auto">
+              <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding Toolbox.ShowsBrushDynamics}">
                 <TextBlock Grid.Column="0" Text="Softness" Classes="subtle" VerticalAlignment="Center" />
                 <Slider Grid.Column="1" Margin="8,0"
                         Minimum="0" Maximum="100"
@@ -139,7 +142,7 @@
                            VerticalAlignment="Center" />
               </Grid>
 
-              <Grid ColumnDefinitions="Auto,*,Auto">
+              <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding Toolbox.ShowsBrushDynamics}">
                 <TextBlock Grid.Column="0" Text="Smoothing" Classes="subtle" VerticalAlignment="Center" />
                 <Slider Grid.Column="1" Margin="8,0"
                         Minimum="0" Maximum="100"

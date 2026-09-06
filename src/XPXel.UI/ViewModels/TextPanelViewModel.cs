@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -70,15 +71,50 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
         _rasterizer = rasterizer;
 
         FontFamilies = rasterizer.FontFamilies;
+
+        RebuildFontSizes();
         PullFromModel();
+    }
+
+    /// <summary>Refills the size list for the font currently chosen.</summary>
+    private void RebuildFontSizes()
+    {
+        IReadOnlyList<double> sizes = PixelFont.IsBuiltIn(FontFamily)
+            ? PixelFontRasterizer.GetExactSizes()
+            : SystemFontSizes;
+
+        AvailableFontSizes.Clear();
+
+        foreach (double size in sizes)
+        {
+            AvailableFontSizes.Add(size);
+        }
     }
 
     /// <summary>The fonts this machine can render, for the family list.</summary>
     public IReadOnlyList<string> FontFamilies { get; }
 
-    /// <summary>The sizes offered in the size list; any other value can still be typed.</summary>
-    public static IReadOnlyList<double> FontSizes { get; } =
-        [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64, 96];
+    /// <summary>The sizes offered for a system font.</summary>
+    /// <remarks>
+    /// Starts at <see cref="TextStyle.MinimumSystemFontSize"/>. Smaller sizes are not offered
+    /// because an outline font rendered without anti-aliasing stops being readable below it,
+    /// and the built-in pixel font is the right answer for anything smaller.
+    /// </remarks>
+    private static IReadOnlyList<double> SystemFontSizes { get; } =
+        [10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 64, 96];
+
+    /// <summary>The sizes offered for the font currently chosen.</summary>
+    /// <remarks>
+    /// The built-in font is offered only the whole multiples it renders exactly, so that an
+    /// artist cannot pick a size and silently be given a different one.
+    /// </remarks>
+    public ObservableCollection<double> AvailableFontSizes { get; } = [];
+
+    /// <summary>The smallest size the chosen font may be set to.</summary>
+    public double MinimumFontSize => TextStyle.GetMinimumFontSize(FontFamily);
+
+    /// <summary>Gets a value indicating whether the built-in pixel font is chosen.</summary>
+    public bool IsPixelFont => PixelFont.IsBuiltIn(FontFamily);
 
     /// <summary>The alignments offered by the alignment buttons.</summary>
     public static IReadOnlyList<TextAlignment> Alignments { get; } = Enum.GetValues<TextAlignment>();
@@ -231,15 +267,42 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
 
     partial void OnTextChanged(string value)
     {
-        if (_isSynchronising || _target is null || _workspace is null)
+        if (_isSynchronising || _target is not { } layer || _workspace is not { } workspace)
         {
             return;
         }
 
-        ApplyChange("Edit Text", layer => layer.Text = value);
+        // Typing into this box is one edit, not one per letter. Opening a live session is what
+        // collapses it: the session holds the state from before the first keystroke and records
+        // a single entry when the box loses focus — or when anything else ends the edit, such as
+        // clicking the canvas or saving. Without it, binding the box to every keystroke would
+        // fill the history with one entry per character, and binding it to lost focus instead
+        // meant the canvas showed nothing at all until the artist clicked away.
+        if (workspace.ActiveTextEdit is not { } session || !ReferenceEquals(session.Layer, layer))
+        {
+            workspace.BeginTextEdit(new TextEditSession(workspace, layer, _rasterizer, isNewLayer: false));
+        }
+
+        ApplyChange("Edit Text", target => target.Text = value);
     }
 
-    partial void OnFontFamilyChanged(string value) => ApplyStyle("Change Font", s => s.FontFamily = value);
+    /// <summary>
+    /// Ends the editing episode the text box started, recording it as one history entry.
+    /// </summary>
+    /// <remarks>
+    /// Called when the box loses focus. Safe when nothing is being edited, and safe when the
+    /// artist is typing on the canvas instead — the session is the same one either way.
+    /// </remarks>
+    public void CommitPendingText() => _workspace?.CommitTextEdit();
+
+    partial void OnFontFamilyChanged(string value)
+    {
+        ApplyStyle("Change Font", s => s.FontFamily = value);
+        RebuildFontSizes();
+
+        OnPropertyChanged(nameof(MinimumFontSize));
+        OnPropertyChanged(nameof(IsPixelFont));
+    }
 
     partial void OnFontSizeChanged(double value) => ApplyStyle("Change Font Size", s => s.FontSize = value);
 
@@ -277,7 +340,11 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
             // No layer selected, so this is a preference for the next piece of text. Nothing
             // in the document changes and nothing goes on the undo stack.
             mutate(_settings.TextDefaults);
-            OnPropertyChanged(nameof(ColorBrush));
+
+            // Read straight back, because the style clamps what it is given — a size between
+            // two whole multiples of the pixel font's cell, say — and the panel must show what
+            // was actually stored rather than what was asked for.
+            PullFromModel();
             return;
         }
 
@@ -393,6 +460,10 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
             _isSynchronising = false;
         }
 
+        RebuildFontSizes();
+
         OnPropertyChanged(nameof(ColorBrush));
+        OnPropertyChanged(nameof(MinimumFontSize));
+        OnPropertyChanged(nameof(IsPixelFont));
     }
 }

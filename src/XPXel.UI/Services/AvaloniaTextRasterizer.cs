@@ -36,6 +36,12 @@ namespace XPXel.UI.Services;
 /// hint would not.
 /// </para>
 /// <para>
+/// <b>The built-in pixel font does not come through here at all.</b> When the style names it,
+/// every call is handed straight to <see cref="PixelFontRasterizer"/>, which draws glyphs as
+/// pixels with no font engine involved. That is what makes the default font render identically
+/// on every platform, in the browser, and in unit tests with no display attached.
+/// </para>
+/// <para>
 /// <b>Threading.</b> Every method must be called on the UI thread, because
 /// <see cref="RenderTargetBitmap"/> is a platform resource. In practice they are: text is
 /// rasterised in response to a keystroke, a style change or a file load, all of which arrive
@@ -64,6 +70,9 @@ public sealed class AvaloniaTextRasterizer : ITextRasterizer
 
     private IReadOnlyList<string>? _fontFamilies;
 
+    /// <summary>The renderer for the fonts built into the application.</summary>
+    private static PixelFontRasterizer BuiltIn => PixelFontRasterizer.Instance;
+
     /// <inheritdoc />
     /// <remarks>
     /// Enumerated once and cached. The installed font list does not change while the
@@ -76,6 +85,11 @@ public sealed class AvaloniaTextRasterizer : ITextRasterizer
     public TextRasterResult? Rasterize(string text, TextStyle style)
     {
         ArgumentNullException.ThrowIfNull(style);
+
+        if (PixelFont.IsBuiltIn(style.FontFamily))
+        {
+            return BuiltIn.Rasterize(text, style);
+        }
 
         if (string.IsNullOrEmpty(text))
         {
@@ -109,6 +123,11 @@ public sealed class AvaloniaTextRasterizer : ITextRasterizer
     {
         ArgumentNullException.ThrowIfNull(style);
 
+        if (PixelFont.IsBuiltIn(style.FontFamily))
+        {
+            return BuiltIn.MeasureCaret(text, style, caretIndex);
+        }
+
         text ??= string.Empty;
 
         TextLayout layout = CreateLayout(text, style);
@@ -130,6 +149,11 @@ public sealed class AvaloniaTextRasterizer : ITextRasterizer
     public int HitTestCaret(string text, TextStyle style, ImagePoint point)
     {
         ArgumentNullException.ThrowIfNull(style);
+
+        if (PixelFont.IsBuiltIn(style.FontFamily))
+        {
+            return BuiltIn.HitTestCaret(text, style, point);
+        }
 
         text ??= string.Empty;
         if (text.Length == 0)
@@ -294,10 +318,11 @@ public sealed class AvaloniaTextRasterizer : ITextRasterizer
 
         names.Sort(StringComparer.CurrentCultureIgnoreCase);
 
-        // The generic families go on top because they are the ones guaranteed to exist
-        // everywhere, and a pixel artist reaches for the monospace one far more often than
-        // for the two hundred display faces beneath it.
-        List<string> result = ["Monospace", "Sans Serif", "Serif"];
+        // The built-in pixel font goes first because it is the only one in the list that is
+        // guaranteed to be legible at sprite sizes, and it is what new text starts with. The
+        // generic families follow, being the ones certain to resolve on every platform, and the
+        // machine's own faces come after them.
+        List<string> result = [.. PixelFont.Families, "Monospace", "Sans Serif", "Serif"];
         result.AddRange(names.Where(n => !result.Contains(n, StringComparer.OrdinalIgnoreCase)));
 
         return result;

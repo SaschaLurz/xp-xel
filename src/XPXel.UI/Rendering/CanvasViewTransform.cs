@@ -156,15 +156,68 @@ public readonly record struct CanvasViewTransform(double Scale, Vector Offset)
         return Math.Clamp(fit, MinimumScale, MaximumScale);
     }
 
-    /// <summary>
-    /// Returns the next zoom step above or below the current scale, following the doubling
-    /// sequence artists expect (…, 1x, 2x, 4x, 8x, …).
-    /// </summary>
+    /// <summary>The slowest zoom the speed setting allows.</summary>
+    public const double MinimumZoomSpeed = 0.25;
+
+    /// <summary>The fastest zoom the speed setting allows.</summary>
+    public const double MaximumZoomSpeed = 3.0;
+
+    /// <summary>The zoom speed used when the artist has not chosen one.</summary>
+    public const double DefaultZoomSpeed = 1.0;
+
+    /// <summary>Returns the next zoom step above or below the current scale.</summary>
     /// <param name="zoomIn"><see langword="true"/> to zoom in, <see langword="false"/> to zoom out.</param>
-    /// <returns>The next scale in the sequence.</returns>
-    public double GetSteppedScale(bool zoomIn)
+    /// <param name="speed">
+    /// How far one step travels, where 1 is the default. Clamped to
+    /// <see cref="MinimumZoomSpeed"/> and <see cref="MaximumZoomSpeed"/>.
+    /// </param>
+    /// <returns>The next scale.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>Above 1:1 the sequence is whole numbers, not doublings.</b> Doubling is what most
+    /// image editors do and it is far too coarse here — 8× to 16× is the difference between
+    /// seeing a sprite and seeing four of its pixels. Whole numbers are the finest sequence
+    /// that still draws every document pixel as an identically sized block, which is
+    /// non-negotiable in a pixel editor: at 3.5× some pixels would be three screen pixels wide
+    /// and others four, and the artwork would appear to have a texture it does not have.
+    /// </para>
+    /// <para>
+    /// The step grows with the scale, so the sequence is fine where the artist is working
+    /// pixel by pixel and coarse up at 40×, where one whole number is a rounding error.
+    /// </para>
+    /// <para>
+    /// <b>Below 1:1 there is nothing to keep even</b> — the image is already being sampled
+    /// down — so the ramp is geometric, which is what feels uniform when zooming out. Zooming
+    /// in through that range stops at exactly 1:1 rather than stepping over it, because 1:1 is
+    /// somewhere artists go deliberately.
+    /// </para>
+    /// </remarks>
+    public double GetSteppedScale(bool zoomIn, double speed = DefaultZoomSpeed)
     {
-        double stepped = zoomIn ? Scale * 2.0 : Scale / 2.0;
+        double factor = Math.Clamp(speed, MinimumZoomSpeed, MaximumZoomSpeed);
+
+        if (Scale >= 1.0)
+        {
+            int current = (int)Math.Round(Scale);
+            int step = Math.Max(1, (int)Math.Round(current * 0.2 * factor));
+            int next = zoomIn ? current + step : current - step;
+
+            if (next >= 1)
+            {
+                return Math.Clamp(next, MinimumScale, MaximumScale);
+            }
+
+            // Zooming out below 1:1 continues in the geometric range below.
+        }
+
+        double octave = Math.Pow(2.0, 0.35 * factor);
+        double stepped = zoomIn ? Scale * octave : Scale / octave;
+
+        if (zoomIn && stepped > 1.0)
+        {
+            return 1.0;
+        }
+
         return Math.Clamp(stepped, MinimumScale, MaximumScale);
     }
 }

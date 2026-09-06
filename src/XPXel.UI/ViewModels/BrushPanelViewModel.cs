@@ -62,13 +62,15 @@ public sealed partial class BrushPanelViewModel : ViewModelBase, IDisposable
     /// <summary>Initialises the panel.</summary>
     /// <param name="settings">The shared tool options this panel edits.</param>
     /// <param name="colors">The drawing colours, so the preview shows the real one.</param>
-    public BrushPanelViewModel(ToolSettings settings, ColorSlots colors)
+    public BrushPanelViewModel(ToolSettings settings, ColorSlots colors, ToolboxViewModel toolbox)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(colors);
+        ArgumentNullException.ThrowIfNull(toolbox);
 
         Settings = settings;
         _colors = colors;
+        Toolbox = toolbox;
 
         SizePresets =
         [
@@ -83,6 +85,16 @@ public sealed partial class BrushPanelViewModel : ViewModelBase, IDisposable
 
     /// <summary>The settings this panel edits, bound to directly by the view.</summary>
     public ToolSettings Settings { get; }
+
+    /// <summary>
+    /// The toolbox, so the panel can hide the settings the active tool does not read.
+    /// </summary>
+    /// <remarks>
+    /// A slider a tool ignores is worse than no slider: the artist drags it, nothing happens,
+    /// and the tool looks broken. The pencil takes a size and nothing else, so with the pencil
+    /// selected that is all this panel offers.
+    /// </remarks>
+    public ToolboxViewModel Toolbox { get; }
 
     /// <summary>The brush shapes offered by the shape selector.</summary>
     public static IReadOnlyList<BrushShape> Shapes { get; } = Enum.GetValues<BrushShape>();

@@ -38,10 +38,17 @@
         </Border>
 
         <StackPanel Grid.Column="1" Spacing="6" VerticalAlignment="Center">
-          <TextBlock Text="SHAPE" Classes="panelHeader" Margin="0" />
-          <ComboBox ItemsSource="{x:Static vm:BrushPanelViewModel.Shapes}"
-                    SelectedItem="{Binding Settings.BrushShape, Mode=TwoWay}"
-                    HorizontalAlignment="Stretch" />
+          <!-- The shape chooser goes away for the pencil, which is square by definition. -->
+          <StackPanel Spacing="6" IsVisible="{Binding Toolbox.ShowsBrushShapeOption}">
+            <TextBlock Text="SHAPE" Classes="panelHeader" Margin="0" />
+            <ComboBox ItemsSource="{x:Static vm:BrushPanelViewModel.Shapes}"
+                      SelectedItem="{Binding Settings.BrushShape, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch" />
+          </StackPanel>
+
+          <TextBlock Text="Square, always." Classes="subtle" TextWrapping="Wrap"
+                     IsVisible="{Binding Toolbox.IsPencilActive}" />
+
           <Button Content="Reset brush"
                   Command="{Binding ResetCommand}"
                   HorizontalAlignment="Stretch"
@@ -94,7 +101,7 @@
       <!-- ============================================================================
            Softness - what one stamp looks like
            ============================================================================ -->
-      <StackPanel Spacing="4">
+      <StackPanel Spacing="4" IsVisible="{Binding Toolbox.ShowsBrushDynamics}">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Grid.Column="0" Text="EDGE SOFTNESS" Classes="panelHeader" Margin="0" />
           <TextBlock Grid.Column="1" Text="{Binding Settings.BrushSoftness, StringFormat={}{0}%}" Classes="subtle" />
@@ -107,7 +114,7 @@
       <!-- ============================================================================
            Stabilisation - where the stamps go
            ============================================================================ -->
-      <StackPanel Spacing="4">
+      <StackPanel Spacing="4" IsVisible="{Binding Toolbox.ShowsBrushDynamics}">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Grid.Column="0" Text="STROKE STABILISATION" Classes="panelHeader" Margin="0" />
           <TextBlock Grid.Column="1" Text="{Binding Settings.BrushStabilization, StringFormat={}{0}%}" Classes="subtle" />
@@ -119,7 +126,13 @@
 
       <TextBlock Classes="subtle"
                  TextWrapping="Wrap"
+                 IsVisible="{Binding Toolbox.ShowsBrushDynamics}"
                  Text="Softness and stabilisation apply to the Brush and Eraser. The Pencil ignores both so that it always writes one exact colour into one exact pixel." />
+
+      <TextBlock Classes="subtle"
+                 TextWrapping="Wrap"
+                 IsVisible="{Binding Toolbox.IsPencilActive}"
+                 Text="The Pencil takes a size and nothing else. It is always a hard square, so a bigger size draws a bigger pixel rather than a rounder one." />
 
     </StackPanel>
   </ScrollViewer>

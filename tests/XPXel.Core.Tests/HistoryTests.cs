@@ -14,6 +14,87 @@ public sealed class HistoryTests
     private static readonly PixelColor Blue = new(0, 0, 255);
 
     [Fact]
+    public void MovingToAPositionUndoesOrRedoesEverythingInBetween()
+    {
+        DocumentHistory history = new();
+        List<string> log = [];
+
+        for (int i = 1; i <= 4; i++)
+        {
+            int step = i;
+            history.Execute(new DelegateCommand($"Step {step}", () => log.Add($"do-{step}"), () => log.Add($"undo-{step}")));
+        }
+
+        log.Clear();
+
+        // Clicking a row three back in the history panel is Ctrl+Z three times, and the artist
+        // should not have to count them.
+        Assert.True(history.MoveTo(1));
+        Assert.Equal(["undo-4", "undo-3", "undo-2"], log);
+
+        log.Clear();
+
+        Assert.True(history.MoveTo(3));
+        Assert.Equal(["do-2", "do-3"], log);
+
+        Assert.False(history.MoveTo(3));
+    }
+
+    [Fact]
+    public void LoweringTheDepthLimitDiscardsTheOldestEntriesImmediately()
+    {
+        DocumentHistory history = new();
+
+        for (int i = 0; i < 10; i++)
+        {
+            history.Execute(new DelegateCommand("Edit", () => { }, () => { }));
+        }
+
+        // A limit that only applied to future work would look like it had done nothing to the
+        // memory the artist was trying to reclaim.
+        history.Capacity = 4;
+
+        Assert.Equal(4, history.Count);
+        Assert.Equal(4, history.Position);
+    }
+
+    [Fact]
+    public void TrimmingNeverThrowsAwayWhatCouldStillBeRedone()
+    {
+        DocumentHistory history = new();
+
+        for (int i = 0; i < 6; i++)
+        {
+            history.Execute(new DelegateCommand("Edit", () => { }, () => { }));
+        }
+
+        history.Undo();
+        history.Undo();
+        history.Undo();
+
+        history.Capacity = 1;
+
+        // Three entries have been undone and are still waiting to be redone. Trimming to one
+        // may drop the applied entries in front of the cursor, but taking the redo stack away
+        // would be watching work vanish that the artist has not finished deciding about.
+        Assert.True(history.CanRedo);
+        Assert.Equal(3, history.Count);
+        Assert.Equal(0, history.Position);
+    }
+
+    [Fact]
+    public void TheDepthLimitIsHeldWithinItsBounds()
+    {
+        DocumentHistory history = new();
+
+        history.Capacity = 0;
+        Assert.Equal(DocumentHistory.MinimumCapacity, history.Capacity);
+
+        history.Capacity = int.MaxValue;
+        Assert.Equal(DocumentHistory.MaximumCapacity, history.Capacity);
+    }
+
+    [Fact]
     public void TheRevisionMovesWheneverTheHistoryDoes()
     {
         DocumentHistory history = new();

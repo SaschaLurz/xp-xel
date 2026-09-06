@@ -69,6 +69,12 @@ public sealed class PixelCanvasControl : Control, IDisposable
     public static readonly StyledProperty<bool> ShowColorSwatchProperty =
         AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowColorSwatch), defaultValue: true);
 
+    /// <summary>How far one zoom step travels.</summary>
+    public static readonly StyledProperty<double> ZoomSpeedProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, double>(
+            nameof(ZoomSpeed),
+            defaultValue: CanvasViewTransform.DefaultZoomSpeed);
+
     /// <summary>The colour painted behind and around the document.</summary>
     public static readonly StyledProperty<IBrush?> CanvasBackgroundProperty =
         AvaloniaProperty.Register<PixelCanvasControl, IBrush?>(nameof(CanvasBackground));
@@ -299,6 +305,16 @@ public sealed class PixelCanvasControl : Control, IDisposable
     {
         get => GetValue(ShowColorSwatchProperty);
         set => SetValue(ShowColorSwatchProperty, value);
+    }
+
+    /// <summary>
+    /// How far one zoom step travels, where 1 is the default. Shared by the wheel, the menu
+    /// and the keyboard, so that "zoom in" means one thing however it is asked for.
+    /// </summary>
+    public double ZoomSpeed
+    {
+        get => GetValue(ZoomSpeedProperty);
+        set => SetValue(ZoomSpeedProperty, value);
     }
 
     /// <summary>The colour painted behind and around the document.</summary>
@@ -1350,11 +1366,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// and the text tool — and any platform that will not make a bitmap cursor at all.
     /// </para>
     /// <para>
-    /// Down and to the right of the pointer by more than the dot is wide, matching where the
-    /// cursor puts it. It is drawn in view space at a fixed size rather than in document
+    /// Up and to the right of the pointer, matching where the cursor puts it so that the two
+    /// never disagree. It is drawn in view space at a fixed size rather than in document
     /// pixels, so it stays the same small dot at every magnification instead of growing into a
-    /// disc at 32×, and the same dark-and-bright outline as every other overlay carries it over
-    /// artwork of its own colour — which is otherwise exactly when it would disappear.
+    /// disc at 32×.
     /// </para>
     /// </remarks>
     private void DrawColorSwatch(DrawingContext context, IBrush dark, IBrush bright)
@@ -1368,8 +1383,9 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
-        const double radius = 4.5;
-        const double offset = 8.5;
+        const double radius = 3.0;
+        const double offsetX = 13.0;
+        const double offsetY = -11.0;
 
         // The brush is cached rather than built per frame: this runs on every pointer move,
         // and the colour changes when a person clicks a swatch, not sixty times a second.
@@ -1380,11 +1396,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _swatchBrush = new ImmutableSolidColorBrush(color.ToAvalonia());
         }
 
-        Point middle = new(position.X + offset + radius, position.Y + offset + radius);
+        Point middle = new(position.X + offsetX, position.Y + offsetY);
 
+        context.DrawEllipse(Brushes.White, null, middle, radius, radius);
         context.DrawEllipse(_swatchBrush, null, middle, radius, radius);
-        context.DrawEllipse(null, new Pen(dark, 2.0), middle, radius, radius);
-        context.DrawEllipse(null, new Pen(bright, 1.0), middle, radius, radius);
     }
 
     /// <summary>
@@ -1772,7 +1787,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // Every stepped zoom is a deliberate act — a menu command, a shortcut or the wheel —
         // so from here on the view is the artist's and must not be re-fitted behind them.
         _hasUserAdjustedView = true;
-        ApplyTransform(_transform.ZoomTo(_transform.GetSteppedScale(zoomIn), focus));
+        ApplyTransform(_transform.ZoomTo(_transform.GetSteppedScale(zoomIn, ZoomSpeed), focus));
     }
 
     private void CenterDocument(double scale)

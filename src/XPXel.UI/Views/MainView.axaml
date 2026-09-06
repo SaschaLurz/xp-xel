@@ -240,6 +240,15 @@
                         IsChecked="{Binding CanvasSettings.ShowPixelGrid, Mode=TwoWay}"
                         VerticalAlignment="Center"
                         ToolTip.Tip="Draw the one-pixel grid over the artwork. Turn it off to see the image as it will be exported" />
+
+              <TextBlock Text="Zoom speed" Classes="subtle" VerticalAlignment="Center" Margin="8,0,0,0" />
+              <Slider Width="90"
+                      Minimum="0.25" Maximum="3"
+                      TickFrequency="0.25"
+                      IsSnapToTickEnabled="True"
+                      VerticalAlignment="Center"
+                      Value="{Binding CanvasSettings.ZoomSpeed, Mode=TwoWay}"
+                      ToolTip.Tip="How far one wheel notch or one zoom command travels" />
             </StackPanel>
 
           </StackPanel>
@@ -284,7 +293,20 @@
                      TextTrimming="CharacterEllipsis"
                      Margin="14,0" />
 
-          <TextBlock Grid.Column="2" Text="{Binding HoveredPixelText}" Classes="subtle" Margin="12,0" />
+          <!-- Each number in its own fixed-width box, so neither label moves as the digits
+               change width. A readout that twitches while the pointer moves is harder to read
+               than one that is a little wider than it needs to be. -->
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="12,0"
+                      VerticalAlignment="Center">
+            <TextBlock Text="x" Classes="subtle" VerticalAlignment="Center" />
+            <Border Classes="statusValue">
+              <TextBlock Text="{Binding HoveredXText}" Classes="subtle" TextAlignment="Center" />
+            </Border>
+            <TextBlock Text="y" Classes="subtle" VerticalAlignment="Center" Margin="4,0,0,0" />
+            <Border Classes="statusValue">
+              <TextBlock Text="{Binding HoveredYText}" Classes="subtle" TextAlignment="Center" />
+            </Border>
+          </StackPanel>
           <TextBlock Grid.Column="3" Text="{Binding DocumentSizeText}" Classes="subtle" Margin="12,0" />
           <TextBlock Grid.Column="4" Text="{Binding ZoomText}" Classes="subtle" Margin="12,0" />
         </Grid>
