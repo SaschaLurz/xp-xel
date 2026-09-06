@@ -47,14 +47,184 @@
     <Setter Property="TextElement.Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
   </Style>
 
-  <!-- A palette swatch. Small, square, and tightly packed so many are visible at once. -->
+  <!-- A palette swatch. Square and tightly packed so many are visible at once, and just
+       large enough to carry the hotbar number printed in its corner - at the twenty pixels
+       these used to be, a nine-point digit had nowhere to sit that was not on top of the
+       border. Ten still fit across the colour panel on one row. -->
   <Style Selector="Button.swatch">
-    <Setter Property="Width" Value="20" />
-    <Setter Property="Height" Value="20" />
+    <Setter Property="Width" Value="26" />
+    <Setter Property="Height" Value="26" />
     <Setter Property="Margin" Value="1" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="{DynamicResource XpPanelBorderBrush}" />
+  </Style>
+
+  <!-- A formatting toggle in the text panel: bold, italic, alignment. Square and compact,
+       the way a word processor's formatting row is, so a row of them reads as one control. -->
+  <Style Selector="ToggleButton.format, RadioButton.format">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <!-- A radio button in that row must not draw the bullet the Fluent theme gives it: these
+       are buttons that happen to be mutually exclusive, not a list of options. -->
+  <Style Selector="RadioButton.format">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="PART_Surface"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{DynamicResource XpPanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="4">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="RadioButton.format:checked /template/ Border#PART_Surface">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
+  </Style>
+
+  <!-- A one-click value in the brush panel. Narrow, so a dozen fit in a docked panel. -->
+  <Style Selector="Button.preset">
+    <Setter Property="MinWidth" Value="30" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="Margin" Value="0,2,3,0" />
+    <Setter Property="Padding" Value="4,0" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+
+  <!-- A vector glyph used as the whole content of a small square button.
+       Bound to the button's own foreground so the icon dims along with the button when its
+       command is unavailable, which a hard-coded brush would not do. -->
+  <Style Selector="Button Path.buttonIcon">
+    <Setter Property="Stroke" Value="{Binding $parent[Button].Foreground}" />
+    <Setter Property="StrokeThickness" Value="1.3" />
+    <Setter Property="StrokeJoin" Value="Round" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+    <Setter Property="Stretch" Value="Uniform" />
+    <Setter Property="Width" Value="14" />
+    <Setter Property="Height" Value="14" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- A number field on the tool options bar.
+       The width is not decoration. A NumericUpDown spends about sixty pixels on its two
+       spinner buttons before the text gets any, so at the ninety pixels these fields used to
+       have there was room for roughly one glyph and a three-digit tolerance rendered as a
+       single clipped character. This leaves the text about fifty pixels, which fits the
+       widest value any of them can hold. -->
+  <Style Selector="NumericUpDown.optionNumber">
+    <Setter Property="Width" Value="118" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="MinWidth" Value="0" />
+  </Style>
+
+  <!-- ================================================================================
+       Timeline
+       ================================================================================ -->
+
+  <!-- A transport or frame-command button: small, square and icon-only, so a dozen of them
+       fit across a docked panel without becoming a wall of text. -->
+  <Style Selector="Button.transport, ToggleButton.transport">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Path.transportIcon">
+    <Setter Property="Stroke" Value="{DynamicResource XpForegroundBrush}" />
+    <Setter Property="StrokeThickness" Value="1.5" />
+    <Setter Property="StrokeJoin" Value="Round" />
+    <Setter Property="StrokeLineCap" Value="Round" />
+    <Setter Property="Width" Value="15" />
+    <Setter Property="Height" Value="15" />
+    <Setter Property="Stretch" Value="Uniform" />
+  </Style>
+
+  <Style Selector="ToggleButton.transport:checked /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+  </Style>
+
+  <!-- A hairline between groups of controls on a toolbar. -->
+  <Style Selector="Border.separator">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Margin" Value="2,3" />
+    <Setter Property="Background" Value="{DynamicResource XpPanelBorderBrush}" />
+  </Style>
+
+  <!-- One frame's column header, holding its number and a preview of it. -->
+  <Style Selector="Button.frameHeader">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="46" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="BorderThickness" Value="0,0,1,1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource XpPanelBorderBrush}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <!-- The playhead. Deliberately the accent colour rather than a subtle tint: while an
+       animation is playing this is the only thing telling the artist where they are. -->
+  <Style Selector="Button.frameHeader.currentFrame">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
+  </Style>
+
+  <!-- One cel in the grid. Same width as a frame header, so the columns line up. -->
+  <Style Selector="Button.celCell">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="BorderThickness" Value="0,0,1,1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource XpPanelBorderBrush}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <!-- The column under the playhead is tinted faintly, so the eye can follow it down through
+       every layer without losing the row it started on. -->
+  <Style Selector="Button.celCell.currentColumn">
+    <Setter Property="Background" Value="{DynamicResource XpTimelineColumnBrush}" />
+  </Style>
+
+  <!-- The one cel that drawing actually affects. -->
+  <Style Selector="Button.celCell.selectedCel">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+  </Style>
+
+  <Style Selector="Border.currentRow">
+    <Setter Property="Background" Value="{DynamicResource XpTimelineColumnBrush}" />
+  </Style>
+
+  <!-- A named animation's chip in the strip beneath the grid. -->
+  <Style Selector="Button.tagChip">
+    <Setter Property="Padding" Value="7,3" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="FontSize" Value="11" />
+  </Style>
+
+  <Style Selector="Button.tagChip.activeTag">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
   </Style>
 
   <!-- The modal overlay behind a dialog. -->

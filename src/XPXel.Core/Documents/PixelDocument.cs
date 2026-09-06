@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using XPXel.Core.ComponentModel;
+using XPXel.Core.Imaging;
 using XPXel.Core.Primitives;
 
 namespace XPXel.Core.Documents;
@@ -33,6 +34,7 @@ namespace XPXel.Core.Documents;
 public sealed class PixelDocument : ObservableModel
 {
     private readonly ObservableCollection<Frame> _frames = [];
+    private readonly ObservableCollection<AnimationTag> _tags = [];
 
     /// <summary>Creates an empty document with one frame and no layers.</summary>
     /// <param name="size">The canvas dimensions.</param>
@@ -46,6 +48,7 @@ public sealed class PixelDocument : ObservableModel
 
         Size = size;
         Frames = new ReadOnlyObservableCollection<Frame>(_frames);
+        Tags = new ReadOnlyObservableCollection<AnimationTag>(_tags);
         Root = new GroupLayer(Guid.NewGuid(), "Root");
         Cels = new CelStore();
         Palette = Palette.CreateDefault();
@@ -57,8 +60,14 @@ public sealed class PixelDocument : ObservableModel
     /// <summary>Raised whenever anything in the document changes.</summary>
     public event EventHandler<DocumentChangedEventArgs>? Changed;
 
-    /// <summary>The canvas dimensions. Every cel buffer is currently this size.</summary>
-    public ImageSize Size { get; }
+    /// <summary>The canvas dimensions. Every cel buffer is this size.</summary>
+    /// <remarks>
+    /// Settable only from inside the document, and only through <see cref="Resize"/> or
+    /// <see cref="RestoreCanvas"/> — both of which bring every cel with them. A size that
+    /// disagreed with the buffers would make every bounds check in the compositor wrong at
+    /// once.
+    /// </remarks>
+    public ImageSize Size { get; private set; }
 
     /// <summary>The rectangle covering the whole canvas.</summary>
     public ImageRect Bounds => Size.ToRect();
@@ -75,6 +84,16 @@ public sealed class PixelDocument : ObservableModel
 
     /// <summary>The pixel content, addressed by layer and frame.</summary>
     public CelStore Cels { get; }
+
+    /// <summary>
+    /// The named animations cut out of the timeline, in the order they are listed.
+    /// </summary>
+    /// <remarks>
+    /// Empty for a document that is a single still image, which is the majority. A document
+    /// with frames but no tags is treated as one unnamed animation covering all of them, so
+    /// nothing has to declare a tag before it can be played or exported.
+    /// </remarks>
+    public ReadOnlyObservableCollection<AnimationTag> Tags { get; }
 
     /// <summary>The document's colour palette.</summary>
     public Palette Palette { get; }
@@ -169,6 +188,30 @@ public sealed class PixelDocument : ObservableModel
     public RasterLayer CreateRasterLayer(string name, GroupLayer? parent = null, int index = -1)
     {
         RasterLayer layer = new(Guid.NewGuid(), name);
+        InsertLayer(layer, parent ?? Root, index);
+        return layer;
+    }
+
+    /// <summary>
+    /// Creates an empty text layer and inserts it into the tree.
+    /// </summary>
+    /// <param name="name">The display name.</param>
+    /// <param name="style">The typography to start from; copied, not referenced.</param>
+    /// <param name="parent">The containing group; defaults to <see cref="Root"/>.</param>
+    /// <param name="index">The position within the parent, or -1 to place it on top.</param>
+    /// <returns>The newly created layer.</returns>
+    /// <remarks>
+    /// The layer arrives with no cel. Its pixels appear the first time
+    /// <see cref="Text.TextLayerRenderer"/> runs over it, which is what every path that
+    /// changes the text goes through.
+    /// </remarks>
+    public TextLayer CreateTextLayer(
+        string name,
+        Text.TextStyle? style = null,
+        GroupLayer? parent = null,
+        int index = -1)
+    {
+        TextLayer layer = new(Guid.NewGuid(), name, style);
         InsertLayer(layer, parent ?? Root, index);
         return layer;
     }
@@ -313,8 +356,11 @@ public sealed class PixelDocument : ObservableModel
     public Frame CreateFrame(int index = -1)
     {
         Frame frame = new(Guid.NewGuid());
-        _frames.Insert(index < 0 ? _frames.Count : index, frame);
+        int at = index < 0 ? _frames.Count : Math.Clamp(index, 0, _frames.Count);
+
+        _frames.Insert(at, frame);
         frame.PropertyChanged += OnContentPropertyChanged;
+        ShiftTagsForInsert(at);
         NotifyStructureChanged();
         return frame;
     }
@@ -337,13 +383,387 @@ public sealed class PixelDocument : ObservableModel
             return null;
         }
 
+        int index = _frames.IndexOf(frame);
+
         IReadOnlyList<Cel> removed = Cels.RemoveAllForFrame(frame.Id);
         frame.PropertyChanged -= OnContentPropertyChanged;
-        _frames.Remove(frame);
+        _frames.RemoveAt(index);
+        ShiftTagsForRemove(index);
         NotifyStructureChanged();
 
         return removed;
     }
+
+    /// <summary>
+    /// Creates an empty folder and inserts it into the tree.
+    /// </summary>
+    /// <param name="name">The display name.</param>
+    /// <param name="parent">The containing group; defaults to <see cref="Root"/>.</param>
+    /// <param name="index">The position within the parent, or -1 to place it on top.</param>
+    /// <returns>The newly created folder.</returns>
+    /// <remarks>
+    /// The compositor has handled groups since the first version — it composites one into a
+    /// scratch buffer and blends the result with the group's own opacity and blend mode — so
+    /// this method is the whole of what "layer folders" needed on the model side.
+    /// </remarks>
+    public GroupLayer CreateGroupLayer(string name, GroupLayer? parent = null, int index = -1)
+    {
+        GroupLayer group = new(Guid.NewGuid(), name);
+        InsertLayer(group, parent ?? Root, index);
+        return group;
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Canvas size
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Changes the canvas dimensions, moving the existing artwork by an offset.
+    /// </summary>
+    /// <param name="newSize">The dimensions to adopt.</param>
+    /// <param name="offset">
+    /// Where the old canvas's top-left corner lands in the new one. A positive offset grows
+    /// the canvas around the artwork; a negative one crops into it.
+    /// </param>
+    /// <returns>
+    /// The cels as they were, which the caller must retain if the change is to be undoable.
+    /// </returns>
+    /// <exception cref="ArgumentException">The new size has a zero dimension.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>One operation covers cropping and expanding.</b> Trimming a 32×32 sprite to 16×32
+    /// and growing it to 64×64 differ only in the sign of the numbers, so treating them as
+    /// two features would mean two code paths that have to agree about anchoring and about
+    /// what happens to the pixels that fall outside.
+    /// </para>
+    /// <para>
+    /// <b>Cels are replaced rather than resized in place.</b> A cel's buffer reference is
+    /// documented as never changing for the cel's lifetime, because tools hold on to it for
+    /// the duration of a stroke. Swapping the whole cel keeps that promise: a stroke in
+    /// progress writes into a buffer that is simply no longer in the document, which the
+    /// session then rolls back harmlessly.
+    /// </para>
+    /// <para>
+    /// <b>Text layers move with the artwork.</b> Their glyphs are in a cel and shift like any
+    /// other pixels, but their <see cref="TextLayer.Origin"/> is in document coordinates and
+    /// would otherwise stay put — so the text would jump back the next time it was
+    /// re-rendered, long after the resize, which is the kind of delayed surprise that is very
+    /// hard to connect to its cause.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<Cel> Resize(ImageSize newSize, ImagePoint offset)
+    {
+        if (newSize.IsEmpty)
+        {
+            throw new ArgumentException("A document must have a non-zero width and height.", nameof(newSize));
+        }
+
+        List<Cel> previous = [.. Cels.All];
+
+        foreach (Cel cel in previous)
+        {
+            PixelBuffer resized = new(newSize);
+
+            // Clipped by CopyRegionTo, so pixels pushed outside the new canvas are simply
+            // dropped — which is what cropping means.
+            cel.Pixels.CopyRegionTo(cel.Pixels.Bounds, resized, new ImagePoint(offset.X, offset.Y));
+
+            Cels.Set(new Cel(cel.LayerId, cel.FrameId, resized)
+            {
+                Offset = ImagePoint.Origin,
+                Opacity = cel.Opacity,
+            });
+        }
+
+        foreach (LayerNode node in EnumerateLayers())
+        {
+            if (node is TextLayer text)
+            {
+                text.Origin = new ImagePoint(text.Origin.X + offset.X, text.Origin.Y + offset.Y);
+            }
+        }
+
+        Size = newSize;
+        Changed?.Invoke(this, new DocumentChangedEventArgs(DocumentChangeKind.Size, Bounds));
+
+        return previous;
+    }
+
+    /// <summary>
+    /// Puts the canvas back to a previous size and content, for the undo of a resize.
+    /// </summary>
+    /// <param name="size">The dimensions to restore.</param>
+    /// <param name="cels">The cels as they were.</param>
+    /// <remarks>
+    /// The old cels are restored wholesale rather than the resize being run backwards,
+    /// because a crop throws pixels away and no inverse offset can bring them back.
+    /// </remarks>
+    public void RestoreCanvas(ImageSize size, IEnumerable<Cel> cels)
+    {
+        ArgumentNullException.ThrowIfNull(cels);
+
+        if (size.IsEmpty)
+        {
+            throw new ArgumentException("A document must have a non-zero width and height.", nameof(size));
+        }
+
+        Size = size;
+
+        foreach (Cel cel in cels)
+        {
+            Cels.Set(cel);
+        }
+
+        Changed?.Invoke(this, new DocumentChangedEventArgs(DocumentChangeKind.Size, Bounds));
+    }
+
+    /// <summary>
+    /// Works out where the old canvas's corner lands when a resize is anchored to one of the
+    /// nine positions.
+    /// </summary>
+    /// <param name="oldSize">The current canvas dimensions.</param>
+    /// <param name="newSize">The dimensions being adopted.</param>
+    /// <param name="anchor">Which part of the artwork stays put.</param>
+    /// <returns>The offset to pass to <see cref="Resize"/>.</returns>
+    /// <remarks>
+    /// Kept here rather than in the dialog so that the arithmetic is testable without a
+    /// display, and so that a future "crop to content" command anchors identically.
+    /// </remarks>
+    public static ImagePoint GetAnchorOffset(ImageSize oldSize, ImageSize newSize, CanvasAnchor anchor)
+    {
+        int dx = newSize.Width - oldSize.Width;
+        int dy = newSize.Height - oldSize.Height;
+
+        int x = anchor switch
+        {
+            CanvasAnchor.TopLeft or CanvasAnchor.Left or CanvasAnchor.BottomLeft => 0,
+            CanvasAnchor.TopRight or CanvasAnchor.Right or CanvasAnchor.BottomRight => dx,
+            _ => dx / 2,
+        };
+
+        int y = anchor switch
+        {
+            CanvasAnchor.TopLeft or CanvasAnchor.Top or CanvasAnchor.TopRight => 0,
+            CanvasAnchor.BottomLeft or CanvasAnchor.Bottom or CanvasAnchor.BottomRight => dy,
+            _ => dy / 2,
+        };
+
+        return new ImagePoint(x, y);
+    }
+
+    /// <summary>
+    /// Inserts an existing frame, keeping its identity so that cels restored alongside it
+    /// stay attached. This is what the undo of "delete frame" calls.
+    /// </summary>
+    /// <param name="frame">The frame to insert.</param>
+    /// <param name="index">The position to insert at, or -1 to append.</param>
+    public void InsertFrame(Frame frame, int index = -1)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+
+        int at = index < 0 ? _frames.Count : Math.Clamp(index, 0, _frames.Count);
+
+        _frames.Insert(at, frame);
+        frame.PropertyChanged += OnContentPropertyChanged;
+        ShiftTagsForInsert(at);
+        NotifyStructureChanged();
+    }
+
+    /// <summary>
+    /// Creates a frame whose content is a copy of an existing one, on every layer.
+    /// </summary>
+    /// <param name="source">The frame to copy.</param>
+    /// <param name="index">The position for the copy, or -1 to place it after the source.</param>
+    /// <returns>The new frame.</returns>
+    /// <remarks>
+    /// Duplicating the previous frame and changing part of it is how hand-drawn animation is
+    /// actually made, so this is the timeline's most-used command rather than a convenience.
+    /// </remarks>
+    public Frame DuplicateFrame(Frame source, int index = -1)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        int sourceIndex = _frames.IndexOf(source);
+        if (sourceIndex < 0)
+        {
+            throw new ArgumentException("The frame is not part of this document.", nameof(source));
+        }
+
+        Frame copy = new(Guid.NewGuid()) { DurationMilliseconds = source.DurationMilliseconds };
+
+        foreach (LayerNode layer in EnumerateLayers())
+        {
+            if (Cels.Find(layer.Id, source.Id) is { } cel)
+            {
+                Cels.Set(cel.CopyTo(layer.Id, copy.Id));
+            }
+        }
+
+        InsertFrame(copy, index < 0 ? sourceIndex + 1 : index);
+        return copy;
+    }
+
+    /// <summary>Moves a frame to a different position in the timeline.</summary>
+    /// <param name="oldIndex">The frame's current position.</param>
+    /// <param name="newIndex">Where it should end up.</param>
+    /// <remarks>
+    /// The cels move with the frame for free, because they are keyed by the frame's identity
+    /// rather than its position — which is the whole reason frames carry a
+    /// <see cref="Guid"/>.
+    /// <para>
+    /// <b>Tag ranges deliberately do not follow.</b> A tag names a stretch of the timeline,
+    /// so dragging a frame from the middle of "walk" into "idle" moves that drawing into the
+    /// idle animation; it does not drag the tag boundary along with it. That is the behaviour
+    /// artists expect from every editor that has both.
+    /// </para>
+    /// </remarks>
+    public void MoveFrame(int oldIndex, int newIndex)
+    {
+        if (oldIndex < 0 || oldIndex >= _frames.Count)
+        {
+            return;
+        }
+
+        int target = Math.Clamp(newIndex, 0, _frames.Count - 1);
+        if (target == oldIndex)
+        {
+            return;
+        }
+
+        _frames.Move(oldIndex, target);
+        NotifyStructureChanged();
+    }
+
+    /// <summary>Returns a frame's position in the timeline, or -1 if it is not part of it.</summary>
+    /// <param name="frame">The frame to locate.</param>
+    /// <returns>The zero-based index.</returns>
+    public int IndexOfFrame(Frame frame) => frame is null ? -1 : _frames.IndexOf(frame);
+
+    // ---------------------------------------------------------------------------------
+    // Animation tags
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>Creates a tag over a range of frames and adds it to the document.</summary>
+    /// <param name="name">The animation's name.</param>
+    /// <param name="from">The first frame index, inclusive.</param>
+    /// <param name="to">The last frame index, inclusive.</param>
+    /// <returns>The new tag.</returns>
+    public AnimationTag CreateTag(string name, int from, int to)
+    {
+        AnimationTag tag = new(Guid.NewGuid(), name, from, to);
+        InsertTag(tag);
+        return tag;
+    }
+
+    /// <summary>Adds an existing tag, keeping its identity.</summary>
+    /// <param name="tag">The tag to add.</param>
+    /// <param name="index">The position in the tag list, or -1 to append.</param>
+    public void InsertTag(AnimationTag tag, int index = -1)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+
+        _tags.Insert(index < 0 ? _tags.Count : Math.Clamp(index, 0, _tags.Count), tag);
+        tag.PropertyChanged += OnContentPropertyChanged;
+        NotifyStructureChanged();
+    }
+
+    /// <summary>Removes a tag.</summary>
+    /// <param name="tag">The tag to remove.</param>
+    /// <returns>The position it occupied, or -1 if it was not present.</returns>
+    public int RemoveTag(AnimationTag tag)
+    {
+        ArgumentNullException.ThrowIfNull(tag);
+
+        int index = _tags.IndexOf(tag);
+        if (index < 0)
+        {
+            return -1;
+        }
+
+        tag.PropertyChanged -= OnContentPropertyChanged;
+        _tags.RemoveAt(index);
+        NotifyStructureChanged();
+
+        return index;
+    }
+
+    /// <summary>Replaces every tag, for deserialization.</summary>
+    /// <param name="tags">The tags to install.</param>
+    public void ReplaceTags(IEnumerable<AnimationTag> tags)
+    {
+        ArgumentNullException.ThrowIfNull(tags);
+
+        foreach (AnimationTag existing in _tags)
+        {
+            existing.PropertyChanged -= OnContentPropertyChanged;
+        }
+
+        _tags.Clear();
+
+        foreach (AnimationTag tag in tags)
+        {
+            tag.PropertyChanged += OnContentPropertyChanged;
+            _tags.Add(tag);
+        }
+
+        NotifyStructureChanged();
+    }
+
+    /// <summary>
+    /// Moves every tag range to account for a frame being inserted at a position.
+    /// </summary>
+    /// <remarks>
+    /// A frame inserted before a tag pushes the whole tag along; one inserted inside it
+    /// extends it, which is what adding an in-between to a walk cycle should do. A frame
+    /// inserted after a tag leaves it alone.
+    /// </remarks>
+    private void ShiftTagsForInsert(int index)
+    {
+        foreach (AnimationTag tag in _tags)
+        {
+            if (index <= tag.From)
+            {
+                tag.To++;
+                tag.From++;
+            }
+            else if (index <= tag.To)
+            {
+                tag.To++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Moves every tag range to account for a frame being removed, dropping any tag left
+    /// with nothing in it.
+    /// </summary>
+    private void ShiftTagsForRemove(int index)
+    {
+        for (int i = _tags.Count - 1; i >= 0; i--)
+        {
+            AnimationTag tag = _tags[i];
+
+            if (index < tag.From)
+            {
+                tag.From--;
+                tag.To--;
+            }
+            else if (index <= tag.To)
+            {
+                // Removing the tag's only frame leaves a range covering nothing. Keeping it
+                // would give the artist an animation that silently exports as an empty sheet.
+                if (tag.FrameCount <= 1)
+                {
+                    tag.PropertyChanged -= OnContentPropertyChanged;
+                    _tags.RemoveAt(i);
+                    continue;
+                }
+
+                tag.To--;
+            }
+        }
+    }
+
 
     private void AttachLayer(LayerNode layer)
     {

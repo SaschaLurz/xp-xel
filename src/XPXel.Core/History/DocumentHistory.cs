@@ -73,6 +73,17 @@ public sealed class DocumentHistory
     /// </summary>
     public bool IsAtSavedState => _cursor == _savedCursor;
 
+    /// <summary>
+    /// A counter that moves whenever the history does, in either direction.
+    /// </summary>
+    /// <remarks>
+    /// Exists for autosave, which needs to tell "nothing has happened since the last backup"
+    /// from "something happened and was undone". Both leave the document looking the same, and
+    /// only the first means there is nothing worth writing. Deliberately a counter rather than
+    /// a hash of the document: this is read on a timer and has to be free.
+    /// </remarks>
+    public int Revision { get; private set; }
+
     /// <summary>Applies a command and records it in the history.</summary>
     /// <param name="command">The command to apply.</param>
     public void Execute(IUndoableCommand command)
@@ -108,6 +119,7 @@ public sealed class DocumentHistory
         _cursor = _commands.Count;
 
         TrimToCapacity();
+        Revision++;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -122,6 +134,7 @@ public sealed class DocumentHistory
 
         _cursor--;
         _commands[_cursor].Undo();
+        Revision++;
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }
@@ -137,6 +150,7 @@ public sealed class DocumentHistory
 
         _commands[_cursor].Redo();
         _cursor++;
+        Revision++;
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }
@@ -157,6 +171,7 @@ public sealed class DocumentHistory
         _commands.Clear();
         _cursor = 0;
         _savedCursor = 0;
+        Revision++;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

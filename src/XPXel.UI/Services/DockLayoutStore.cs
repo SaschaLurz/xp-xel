@@ -36,7 +36,13 @@ public sealed class DockLayoutStore
     /// would produce something confusing — a panel in a place it can no longer be reached
     /// from, for instance. A mismatch silently discards the saved layout.
     /// </summary>
-    private const string LayoutVersion = "1";
+    /// <remarks>
+    /// Raised to 2 when the brush and text panels were added and the docks around them were
+    /// rearranged, and to 3 when the timeline and preview arrived. A version 2 layout has no
+    /// row beneath the document area at all, so a restored one would leave the timeline with
+    /// nowhere to live.
+    /// </remarks>
+    private const string LayoutVersion = "3";
 
     private const string VersionKey = "layout.version";
 

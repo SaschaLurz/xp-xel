@@ -62,6 +62,17 @@ public readonly record struct CanvasViewTransform(double Scale, Vector Offset)
     public Point ToViewPoint(ImagePoint point) =>
         new((point.X * Scale) + Offset.X, (point.Y * Scale) + Offset.Y);
 
+    /// <summary>The on-screen rectangle a rectangle of image pixels occupies.</summary>
+    /// <param name="rect">The region in image coordinates.</param>
+    /// <returns>The region's bounds in view space.</returns>
+    /// <remarks>
+    /// Used to outline things measured in pixels — the pixel under the pointer, the brush
+    /// footprint, the selection — so that every such overlay lines up exactly with the
+    /// artwork at any zoom instead of being computed slightly differently each time.
+    /// </remarks>
+    public Rect GetPixelRect(ImageRect rect) =>
+        new(ToViewPoint(rect.Origin), new Size(rect.Width * Scale, rect.Height * Scale));
+
     /// <summary>Returns a transform panned by the given view-space delta.</summary>
     /// <param name="delta">How far to move the document.</param>
     /// <returns>The panned transform.</returns>

@@ -33,11 +33,20 @@
     <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
     <KeyBinding Gesture="Ctrl+E" Command="{Binding ExportCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+E" Command="{Binding ExportAnimationCommand}" />
     <KeyBinding Gesture="Ctrl+W" Command="{Binding CloseDocumentCommand}" />
     <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
-    <KeyBinding Gesture="X" Command="{Binding SwapColorsCommand}" />
+    <KeyBinding Gesture="Ctrl+A" Command="{Binding SelectAllCommand}" />
+    <KeyBinding Gesture="Ctrl+D" Command="{Binding DeselectCommand}" />
+    <KeyBinding Gesture="Ctrl+Shift+I" Command="{Binding InvertSelectionCommand}" />
+    <KeyBinding Gesture="Ctrl+T" Command="{Binding FreeTransformCommand}" />
+    <KeyBinding Gesture="Ctrl+Alt+C" Command="{Binding ChangeCanvasSizeCommand}" />
+    <!-- The bare-key shortcuts - X to swap colours, and one letter per tool - are handled in
+         code-behind rather than declared here. A KeyBinding fires wherever the key is
+         pressed, so binding "X" would swap the drawing colours in the middle of renaming a
+         layer to "Axe". The code-behind checks first that nothing is being typed into. -->
   </UserControl.KeyBindings>
 
   <Grid Background="{DynamicResource XpAppBackgroundBrush}">
@@ -56,6 +65,12 @@
           <MenuItem Header="Save _As…" InputGesture="Ctrl+Shift+S" Command="{Binding SaveAsCommand}" />
           <Separator />
           <MenuItem Header="_Export Image…" InputGesture="Ctrl+E" Command="{Binding ExportCommand}" />
+          <MenuItem Header="Export _Animation…" InputGesture="Ctrl+Shift+E" Command="{Binding ExportAnimationCommand}" />
+          <Separator />
+          <MenuItem Header="Open _Backups Folder"
+                    Command="{Binding OpenBackupFolderCommand}"
+                    IsEnabled="{Binding IsAutosaveAvailable}"
+                    ToolTip.Tip="XP-xel keeps the last three copies of every open document, taken every three minutes" />
           <Separator />
           <MenuItem Header="_Close Document" InputGesture="Ctrl+W" Command="{Binding CloseDocumentCommand}" />
         </MenuItem>
@@ -65,6 +80,40 @@
           <MenuItem Header="_Redo" InputGesture="Ctrl+Y" Command="{Binding RedoCommand}" />
           <Separator />
           <MenuItem Header="S_wap Colours" InputGesture="X" Command="{Binding SwapColorsCommand}" />
+        </MenuItem>
+
+        <MenuItem Header="_Image">
+          <MenuItem Header="_Canvas Size…" InputGesture="Ctrl+Alt+C" Command="{Binding ChangeCanvasSizeCommand}" />
+          <MenuItem Header="Crop to _Selection" Command="{Binding CropToSelectionCommand}" />
+        </MenuItem>
+
+        <MenuItem Header="_Select">
+          <MenuItem Header="Select _All" InputGesture="Ctrl+A" Command="{Binding SelectAllCommand}" />
+          <MenuItem Header="_Deselect" InputGesture="Ctrl+D" Command="{Binding DeselectCommand}" />
+          <MenuItem Header="_Invert Selection" InputGesture="Ctrl+Shift+I" Command="{Binding InvertSelectionCommand}" />
+          <Separator />
+          <MenuItem Header="_Move Selected Pixels" InputGesture="Ctrl+T"
+                    Command="{Binding FreeTransformCommand}"
+                    ToolTip.Tip="Lift the selected pixels and drag them. Enter places them, Escape puts them back" />
+        </MenuItem>
+
+        <MenuItem Header="_Animation">
+          <MenuItem Header="_Add Frame" Command="{Binding Timeline.AddFrameCommand}" />
+          <MenuItem Header="_Duplicate Frame" Command="{Binding Timeline.DuplicateFrameCommand}" />
+          <MenuItem Header="De_lete Frame" Command="{Binding Timeline.DeleteFrameCommand}" />
+          <Separator />
+          <MenuItem Header="Move Frame _Earlier" Command="{Binding Timeline.MoveFrameLeftCommand}" />
+          <MenuItem Header="Move Frame _Later" Command="{Binding Timeline.MoveFrameRightCommand}" />
+          <Separator />
+          <MenuItem Header="_Play / Pause" Command="{Binding Timeline.Playback.ToggleCommand}" />
+          <MenuItem Header="_Previous Frame" Command="{Binding Timeline.Playback.StepBackCommand}" />
+          <MenuItem Header="_Next Frame" Command="{Binding Timeline.Playback.StepForwardCommand}" />
+          <Separator />
+          <MenuItem Header="Name an A_nimation" Command="{Binding Timeline.AddTagCommand}" />
+          <Separator />
+          <MenuItem Header="_Onion Skin"
+                    ToggleType="CheckBox"
+                    IsChecked="{Binding CanvasSettings.OnionSkin.IsEnabled, Mode=TwoWay}" />
         </MenuItem>
 
         <MenuItem Header="_Layer">
@@ -91,14 +140,29 @@
           <MenuItem Header="Show Pixel _Grid"
                     ToggleType="CheckBox"
                     IsChecked="{Binding CanvasSettings.ShowPixelGrid, Mode=TwoWay}" />
+          <MenuItem Header="Show _Rulers"
+                    ToggleType="CheckBox"
+                    IsChecked="{Binding CanvasSettings.ShowRulers, Mode=TwoWay}" />
+          <MenuItem Header="Show Colour by the C_ursor"
+                    ToggleType="CheckBox"
+                    IsChecked="{Binding CanvasSettings.ShowColorSwatchCursor, Mode=TwoWay}" />
           <Separator />
-          <MenuItem Header="_Panels">
-            <MenuItem Header="_Tools" Command="{Binding ShowPanelCommand}" CommandParameter="Toolbox" />
-            <MenuItem Header="_Layers" Command="{Binding ShowPanelCommand}" CommandParameter="Layers" />
-            <MenuItem Header="_Colour" Command="{Binding ShowPanelCommand}" CommandParameter="Colour" />
-            <Separator />
-            <MenuItem Header="_Reset Layout" Command="{Binding ResetLayoutCommand}" />
+          <!-- One checkable entry per panel, driven by the panel table in XpDockFactory, so a
+               panel added later appears here without this file changing. The checkmark shows
+               what is actually on screen and toggling it affects only that one panel - the
+               previous plain menu items rebuilt the whole default layout whenever a closed
+               panel was asked for, which switched every other panel back on with it. -->
+          <MenuItem Header="_Panels" ItemsSource="{Binding Panels}">
+            <MenuItem.ItemContainerTheme>
+              <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}"
+                            x:DataType="vm:PanelToggleViewModel">
+                <Setter Property="Header" Value="{Binding Title}" />
+                <Setter Property="ToggleType" Value="CheckBox" />
+                <Setter Property="IsChecked" Value="{Binding IsVisible, Mode=TwoWay}" />
+              </ControlTheme>
+            </MenuItem.ItemContainerTheme>
           </MenuItem>
+          <MenuItem Header="Reset to _Default Layout" Command="{Binding ResetLayoutCommand}" />
           <Separator />
           <MenuItem Header="_Theme">
             <MenuItem Header="Follow _System"
@@ -124,47 +188,105 @@
            Tool options
            ============================================================================ -->
       <Border DockPanel.Dock="Top" Classes="panel" Padding="8,5">
-        <StackPanel Orientation="Horizontal" Spacing="14">
+        <Grid ColumnDefinitions="*,Auto">
 
-          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-            <TextBlock Text="Brush" Classes="subtle" VerticalAlignment="Center" />
-            <NumericUpDown Value="{Binding Toolbox.ToolSettings.BrushSize, Mode=TwoWay}"
-                           Minimum="1" Maximum="64" Increment="1"
-                           FormatString="0" Width="90" />
-            <ComboBox ItemsSource="{x:Static vm:ToolboxViewModel.BrushShapes}"
-                      SelectedItem="{Binding Toolbox.ToolSettings.BrushShape, Mode=TwoWay}"
-                      Width="100" />
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="14">
+
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="Brush" Classes="subtle" VerticalAlignment="Center" />
+              <NumericUpDown Classes="optionNumber"
+                             Value="{Binding Toolbox.ToolSettings.BrushSize, Mode=TwoWay}"
+                             Minimum="1" Maximum="128" Increment="1"
+                             FormatString="0" />
+              <ComboBox ItemsSource="{x:Static vm:ToolboxViewModel.BrushShapes}"
+                        SelectedItem="{Binding Toolbox.ToolSettings.BrushShape, Mode=TwoWay}"
+                        Width="100" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="Shape" Classes="subtle" VerticalAlignment="Center" />
+              <CheckBox Content="Filled"
+                        IsChecked="{Binding Toolbox.ToolSettings.IsShapeFilled, Mode=TwoWay}"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Whether the rectangle and ellipse tools fill their shape or outline it" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="Fill tolerance" Classes="subtle" VerticalAlignment="Center" />
+              <NumericUpDown Classes="optionNumber"
+                             Value="{Binding Toolbox.ToolSettings.FillTolerance, Mode=TwoWay}"
+                             Minimum="0" Maximum="255" Increment="1"
+                             FormatString="0" />
+              <CheckBox Content="Contiguous"
+                        IsChecked="{Binding Toolbox.ToolSettings.IsFillContiguous, Mode=TwoWay}"
+                        VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="Export scale" Classes="subtle" VerticalAlignment="Center" />
+              <NumericUpDown Classes="optionNumber"
+                             Value="{Binding ExportScale, Mode=TwoWay}"
+                             Minimum="1" Maximum="16" Increment="1"
+                             FormatString="0" />
+            </StackPanel>
+
+            <!-- The grid is on the options bar rather than only in the View menu because it
+                 is switched off to check how the artwork actually reads, which is a thing an
+                 artist does every few minutes and wants back immediately afterwards. Anything
+                 reached that often should not be two clicks into a menu. -->
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBlock Text="View" Classes="subtle" VerticalAlignment="Center" />
+              <CheckBox Content="Grid"
+                        IsChecked="{Binding CanvasSettings.ShowPixelGrid, Mode=TwoWay}"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Draw the one-pixel grid over the artwork. Turn it off to see the image as it will be exported" />
+            </StackPanel>
+
           </StackPanel>
 
-          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-            <TextBlock Text="Fill tolerance" Classes="subtle" VerticalAlignment="Center" />
-            <NumericUpDown Value="{Binding Toolbox.ToolSettings.FillTolerance, Mode=TwoWay}"
-                           Minimum="0" Maximum="255" Increment="1"
-                           FormatString="0" Width="90" />
-            <CheckBox Content="Contiguous"
-                      IsChecked="{Binding Toolbox.ToolSettings.IsFillContiguous, Mode=TwoWay}"
-                      VerticalAlignment="Center" />
-          </StackPanel>
+          <!-- The way back, always visible. Buried in a menu, "reset the layout" is something
+               an artist has to already know exists at the moment they most need it - which is
+               when the panels are in a state they cannot undo by hand. -->
+          <Button Grid.Column="1"
+                  Command="{Binding ResetLayoutCommand}"
+                  VerticalAlignment="Center"
+                  Padding="8,3"
+                  ToolTip.Tip="Put every panel back where it started, keeping all open documents">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Path Data="M4 4 L4 20 L20 20 L20 4 Z M4 9 L20 9 M15 9 L15 20"
+                    Stroke="{Binding $parent[Button].Foreground}"
+                    StrokeThickness="1.5"
+                    StrokeJoin="Round"
+                    Width="15" Height="15"
+                    Stretch="Uniform"
+                    VerticalAlignment="Center" />
+              <TextBlock Text="Default layout" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
 
-          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-            <TextBlock Text="Export scale" Classes="subtle" VerticalAlignment="Center" />
-            <NumericUpDown Value="{Binding ExportScale, Mode=TwoWay}"
-                           Minimum="1" Maximum="16" Increment="1"
-                           FormatString="0" Width="90" />
-          </StackPanel>
-
-        </StackPanel>
+        </Grid>
       </Border>
 
       <!-- ============================================================================
            Status bar
            ============================================================================ -->
       <Border DockPanel.Dock="Bottom" Classes="panel" Padding="8,4">
-        <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
           <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" Classes="subtle" />
-          <TextBlock Grid.Column="1" Text="{Binding HoveredPixelText}" Classes="subtle" Margin="12,0" />
-          <TextBlock Grid.Column="2" Text="{Binding DocumentSizeText}" Classes="subtle" Margin="12,0" />
-          <TextBlock Grid.Column="3" Text="{Binding ZoomText}" Classes="subtle" Margin="12,0" />
+
+          <!-- Why the drawing tools are currently doing nothing. Every one of these states
+               used to fail silently, which reads as the tool being broken. -->
+          <TextBlock Grid.Column="1"
+                     Text="{Binding EditabilityWarning}"
+                     IsVisible="{Binding HasEditabilityWarning}"
+                     Foreground="{DynamicResource XpAccentBrush}"
+                     FontSize="11"
+                     TextTrimming="CharacterEllipsis"
+                     Margin="14,0" />
+
+          <TextBlock Grid.Column="2" Text="{Binding HoveredPixelText}" Classes="subtle" Margin="12,0" />
+          <TextBlock Grid.Column="3" Text="{Binding DocumentSizeText}" Classes="subtle" Margin="12,0" />
+          <TextBlock Grid.Column="4" Text="{Binding ZoomText}" Classes="subtle" Margin="12,0" />
         </Grid>
       </Border>
 

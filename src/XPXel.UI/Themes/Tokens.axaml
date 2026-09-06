@@ -37,12 +37,28 @@
       <SolidColorBrush x:Key="XpPixelGridBrush" Color="#26000000" />
       <SolidColorBrush x:Key="XpScrimBrush" Color="#66000000" />
 
+      <!-- Overlay outlines - the hovered pixel, the brush footprint, the selection edge.
+           Deliberately identical in both themes: these are drawn on top of the artwork, not
+           on top of the interface, and the artwork does not change colour with the theme. The
+           pair is always drawn together so the outline carries its own contrast whatever it
+           crosses. -->
+      <SolidColorBrush x:Key="XpCanvasHighlightBrush" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="XpCanvasHighlightShadowBrush" Color="#C0000000" />
+
       <Color x:Key="XpCheckerLightColor">#FFCFCFCF</Color>
       <Color x:Key="XpCheckerDarkColor">#FFA8A8A8</Color>
 
       <!-- A flat mid grey behind layer previews. A real checkerboard would compete with the
            artwork at 30 pixels square, where the squares would be larger than the sprite. -->
       <SolidColorBrush x:Key="XpThumbnailCheckerBrush" Color="#FFBEBEBE" />
+
+      <!-- The faint tint marking the timeline row and column the artist is on. Low contrast
+           on purpose: it has to be findable without competing with the playhead. -->
+      <SolidColorBrush x:Key="XpTimelineColumnBrush" Color="#14000000" />
+
+      <!-- The ruler's marker for the row and column under the pointer. Translucent so the
+           tick marks and numbers underneath stay readable through it. -->
+      <SolidColorBrush x:Key="XpRulerHighlightBrush" Color="#402D6CDF" />
     </ResourceDictionary>
 
     <!-- ================================================================================
@@ -64,10 +80,17 @@
 
       <!-- The checkerboard stays mid-toned in both themes. Making it dark here would let
            dark artwork disappear into it, which is the opposite of what it is for. -->
+      <SolidColorBrush x:Key="XpCanvasHighlightBrush" Color="#FFFFFFFF" />
+      <SolidColorBrush x:Key="XpCanvasHighlightShadowBrush" Color="#C0000000" />
+
       <Color x:Key="XpCheckerLightColor">#FF6E6E70</Color>
       <Color x:Key="XpCheckerDarkColor">#FF56565A</Color>
 
       <SolidColorBrush x:Key="XpThumbnailCheckerBrush" Color="#FF5F5F63" />
+
+      <SolidColorBrush x:Key="XpTimelineColumnBrush" Color="#1AFFFFFF" />
+
+      <SolidColorBrush x:Key="XpRulerHighlightBrush" Color="#4D4E8EF7" />
     </ResourceDictionary>
 
   </ResourceDictionary.ThemeDictionaries>

@@ -1,18 +1,143 @@
 <!--
   The colour panel: the two active colours, a channel editor for the primary one, and the
-  document palette.
+  palette.
 
   Channel sliders and a hexadecimal field rather than a colour wheel - exact numbers are
-  what pixel artists work in, and hex is how palettes are shared. A spectrum picker is a
-  sensible later addition and would sit above these, writing to the same colour slots.
+  what pixel artists work in, and hex is how palettes are shared. Right-clicking any swatch
+  opens the richer editor: the same colour in hue, saturation and value, with a shading ramp
+  and the colour-wheel relations laid out beside it.
+
+  The palette's first ten swatches carry the numbers 1-9 and 0, and those keys select them.
+  They are ordinary palette entries - the number is just what the position is worth - so the
+  hotbar is saved with the document like the rest of the palette.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:conv="using:XPXel.UI.Converters"
-             xmlns:prim="using:XPXel.Core.Primitives"
              xmlns:vm="using:XPXel.UI.ViewModels"
              x:Class="XPXel.UI.Views.ColorPanelView"
              x:DataType="vm:PaletteViewModel">
+
+  <UserControl.Resources>
+
+    <!-- ==================================================================================
+         The right-click colour editor.
+
+         Declared once and shown against whichever swatch was clicked, because only one can
+         be open at a time and each open recomputes a ramp and five harmonies.
+         ================================================================================== -->
+    <Flyout x:Key="ColorEditorFlyout" Placement="Pointer">
+      <StackPanel Spacing="10" Width="270" x:DataType="vm:ColorEditorViewModel">
+
+        <Grid ColumnDefinitions="Auto,*">
+          <Border Grid.Column="0"
+                  Width="34" Height="34"
+                  Background="{Binding PreviewBrush}"
+                  BorderBrush="{DynamicResource XpPanelBorderBrush}"
+                  BorderThickness="1" />
+          <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center">
+            <TextBlock Text="{Binding TargetLabel}" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding HexText}" Classes="subtle" />
+          </StackPanel>
+        </Grid>
+
+        <!-- Hue, saturation and value rather than red, green and blue. "A little darker" is
+             one slider here and three coupled ones in the channel editor above; the two are
+             complementary, which is why both exist. -->
+        <Grid ColumnDefinitions="24,*,32" RowDefinitions="Auto,Auto,Auto,Auto">
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="H" Classes="subtle" VerticalAlignment="Center" />
+          <Slider Grid.Row="0" Grid.Column="1" Minimum="0" Maximum="360"
+                  Value="{Binding Hue, Mode=TwoWay}" />
+          <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Hue, StringFormat={}{0:F0}}"
+                     Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="S" Classes="subtle" VerticalAlignment="Center" />
+          <Slider Grid.Row="1" Grid.Column="1" Minimum="0" Maximum="100"
+                  Value="{Binding Saturation, Mode=TwoWay}" />
+          <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding Saturation, StringFormat={}{0:F0}}"
+                     Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="V" Classes="subtle" VerticalAlignment="Center" />
+          <Slider Grid.Row="2" Grid.Column="1" Minimum="0" Maximum="100"
+                  Value="{Binding Value, Mode=TwoWay}" />
+          <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding Value, StringFormat={}{0:F0}}"
+                     Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+
+          <TextBlock Grid.Row="3" Grid.Column="0" Text="A" Classes="subtle" VerticalAlignment="Center" />
+          <Slider Grid.Row="3" Grid.Column="1" Minimum="0" Maximum="255"
+                  Value="{Binding Alpha, Mode=TwoWay}" />
+          <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding Alpha, StringFormat={}{0:F0}}"
+                     Classes="subtle" TextAlignment="Right" VerticalAlignment="Center" />
+        </Grid>
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="SHADING RAMP" Classes="panelHeader" Margin="0" />
+          <TextBlock Text="Shadows shift towards blue and highlights towards yellow, the way light actually behaves."
+                     Classes="subtle" FontSize="11" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Ramp}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <UniformGrid Rows="1" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ColorSuggestionViewModel">
+                <!-- Clicking a suggestion loads it into the editor rather than committing it,
+                     so a ramp can be walked along - a shadow, then its shadow - before
+                     anything is chosen. -->
+                <Button Classes="swatch"
+                        Height="26"
+                        Margin="0,0,2,0"
+                        HorizontalAlignment="Stretch"
+                        Background="{Binding Brush}"
+                        ToolTip.Tip="{Binding Description}"
+                        Command="{Binding $parent[ItemsControl].((vm:ColorEditorViewModel)DataContext).PickSuggestionCommand}"
+                        CommandParameter="{Binding}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="4" IsVisible="{Binding HasHarmonies}">
+          <TextBlock Text="GOES WITH" Classes="panelHeader" Margin="0" />
+          <ItemsControl ItemsSource="{Binding Harmonies}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <UniformGrid Rows="1" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ColorSuggestionViewModel">
+                <Button Classes="swatch"
+                        Height="26"
+                        Margin="0,0,2,0"
+                        HorizontalAlignment="Stretch"
+                        Background="{Binding Brush}"
+                        ToolTip.Tip="{Binding Description}"
+                        Command="{Binding $parent[ItemsControl].((vm:ColorEditorViewModel)DataContext).PickSuggestionCommand}"
+                        CommandParameter="{Binding}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+          <Button Content="Remove"
+                  IsVisible="{Binding CanSave}"
+                  Command="{Binding RemoveCommand}"
+                  ToolTip.Tip="Take this colour out of the palette" />
+          <Button Content="Draw with it"
+                  Command="{Binding ApplyCommand}"
+                  ToolTip.Tip="Use this colour without changing the palette" />
+          <Button Content="Save to slot"
+                  IsVisible="{Binding CanSave}"
+                  Command="{Binding SaveCommand}"
+                  ToolTip.Tip="Replace the palette colour with this one, and draw with it" />
+        </StackPanel>
+
+      </StackPanel>
+    </Flyout>
+
+  </UserControl.Resources>
 
   <StackPanel Margin="0,4,0,8">
 
@@ -24,18 +149,20 @@
          ================================================================================ -->
     <Grid ColumnDefinitions="Auto,Auto,*" Margin="8,0,8,8">
       <Border Grid.Column="0"
+              x:Name="PrimarySwatch"
               Width="40" Height="40"
               Background="{Binding PrimaryBrush}"
               BorderBrush="{DynamicResource XpPanelBorderBrush}"
               BorderThickness="1"
-              ToolTip.Tip="Primary colour — left mouse button" />
+              PointerReleased="OnPrimaryPointerReleased"
+              ToolTip.Tip="Primary colour — left mouse button draws with it, right-click to edit it" />
       <Border Grid.Column="1"
               Width="28" Height="28"
               Margin="6,12,0,0"
               Background="{Binding SecondaryBrush}"
               BorderBrush="{DynamicResource XpPanelBorderBrush}"
               BorderThickness="1"
-              ToolTip.Tip="Secondary colour — right mouse button" />
+              ToolTip.Tip="Secondary colour — press X to swap it in" />
       <Button Grid.Column="2"
               Content="⇄"
               Margin="8,0,0,0"
@@ -77,7 +204,7 @@
              ToolTip.Tip="Hexadecimal colour — accepts #RGB, #RGBA, #RRGGBB and #RRGGBBAA" />
 
     <!-- ================================================================================
-         Palette
+         Palette, whose first ten entries are the hotbar
          ================================================================================ -->
     <Grid ColumnDefinitions="*,Auto" Margin="0,10,8,0">
       <TextBlock Grid.Column="0" Text="PALETTE" Classes="panelHeader" />
@@ -86,24 +213,39 @@
               ToolTip.Tip="Add the primary colour to the palette" />
     </Grid>
 
+    <TextBlock Text="Press 1–9 or 0 to pick a numbered colour. Right-click any swatch to edit it."
+               Classes="subtle"
+               FontSize="11"
+               TextWrapping="Wrap"
+               Margin="8,0,8,0" />
+
     <ScrollViewer MaxHeight="150" Margin="8,4,8,0">
-      <ItemsControl ItemsSource="{Binding Palette.Colors}">
+      <ItemsControl ItemsSource="{Binding Swatches}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <WrapPanel />
           </ItemsPanelTemplate>
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="prim:PixelColor">
-            <!-- The swatch reports its own colour as the command parameter, so the palette
-                 stays a plain list of colours with no per-entry view model. -->
+          <DataTemplate x:DataType="vm:PaletteSwatchViewModel">
+            <!-- The number is drawn on the swatch rather than beside it: a row of ten
+                 swatches with ten labels under them is twice the height and half as quick
+                 to read. Its colour follows the swatch's brightness so it stays legible on
+                 both the black and the white one. -->
             <Button Classes="swatch"
-                    Background="{Binding Converter={x:Static conv:PixelColorToBrushConverter.Instance}}"
-                    Command="{Binding $parent[ItemsControl].((vm:PaletteViewModel)DataContext).SelectPrimaryCommand}"
+                    Background="{Binding Brush}"
+                    ToolTip.Tip="{Binding Description}"
+                    PointerReleased="OnSwatchPointerReleased"
+                    Command="{Binding $parent[ItemsControl].((vm:PaletteViewModel)DataContext).SelectSwatchCommand}"
                     CommandParameter="{Binding}">
-              <ToolTip.Tip>
-                <TextBlock Text="{Binding}" />
-              </ToolTip.Tip>
+              <TextBlock Text="{Binding HotkeyLabel}"
+                         IsVisible="{Binding HasHotkey}"
+                         Foreground="{Binding LabelBrush}"
+                         FontSize="9"
+                         FontWeight="SemiBold"
+                         HorizontalAlignment="Right"
+                         VerticalAlignment="Bottom"
+                         Margin="0,0,1,0" />
             </Button>
           </DataTemplate>
         </ItemsControl.ItemTemplate>

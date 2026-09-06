@@ -201,6 +201,7 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
             {
                 OnPropertyChanged(nameof(IsDropTargetAbove));
                 OnPropertyChanged(nameof(IsDropTargetBelow));
+                OnPropertyChanged(nameof(IsDropTargetInside));
             }
         }
     }
@@ -210,6 +211,13 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
 
     /// <summary>Gets a value indicating whether the insertion line sits below this row.</summary>
     public bool IsDropTargetBelow => DropPosition == LayerDropPosition.Below;
+
+    /// <summary>
+    /// Gets a value indicating whether dropping now would move the dragged layer inside this
+    /// folder. The row draws an outline rather than an insertion line, because "into this
+    /// box" and "between these two rows" have to look different to be told apart mid-drag.
+    /// </summary>
+    public bool IsDropTargetInside => DropPosition == LayerDropPosition.Inside;
 
     /// <summary>
     /// Applies a label colour given as hexadecimal, or clears it when the text is empty.

@@ -135,6 +135,36 @@ public sealed class RasterEditSession
     }
 
     /// <summary>
+    /// Returns the value a pixel held before this session touched it.
+    /// </summary>
+    /// <param name="x">The horizontal coordinate in the cel buffer.</param>
+    /// <param name="y">The vertical coordinate in the cel buffer.</param>
+    /// <returns>The pre-session colour, or the current one for a pixel not yet touched.</returns>
+    /// <remarks>
+    /// A soft brush needs this. Its stamps overlap heavily along a stroke, and compositing
+    /// each one onto the result of the last would darken the middle of the stroke into a
+    /// solid line every time the pointer slowed down. Compositing against the pixel's
+    /// <em>pre-stroke</em> value instead makes a stamp idempotent, so passing over the same
+    /// pixel twice in one stroke looks the same as passing over it once.
+    /// </remarks>
+    public PixelColor GetOriginalPixel(int x, int y)
+    {
+        if (_snapshot is not null)
+        {
+            return _snapshot.GetPixelOrTransparent(x, y);
+        }
+
+        if (_originals is not null
+            && _cel.Pixels.Size.Contains(x, y)
+            && _originals.TryGetValue((y * _cel.Pixels.Width) + x, out PixelColor original))
+        {
+            return original;
+        }
+
+        return _cel.Pixels.GetPixelOrTransparent(x, y);
+    }
+
+    /// <summary>
     /// Replaces a pixel, recording its previous value. Writing the value a pixel already
     /// holds is not a change and is ignored, which keeps no-op strokes out of the history.
     /// </summary>
@@ -218,7 +248,20 @@ public sealed class RasterEditSession
     /// Abandons the session, restoring every pixel it changed. Used when a stroke is
     /// cancelled — for example by pressing Escape or right-clicking mid-drag.
     /// </summary>
-    public void Rollback()
+    public void Rollback() => ResetToOriginal();
+
+    /// <summary>
+    /// Restores every pixel this session has changed and leaves the session open and
+    /// reusable.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes a live shape preview one undo step. A rectangle tool redraws its
+    /// outline on every pointer move, and each redraw has to erase the last one; doing that
+    /// by resetting the session rather than by opening a new one means the artist gets a
+    /// single history entry for the whole drag, with the original pixels correctly recorded
+    /// from before the first preview.
+    /// </remarks>
+    public void ResetToOriginal()
     {
         if (!HasChanges)
         {

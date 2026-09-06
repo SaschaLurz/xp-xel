@@ -45,4 +45,15 @@ internal static class ProjectSchema
 
     /// <summary>The <see cref="LayerManifest.Type"/> value for a folder.</summary>
     public const string GroupLayerType = "group";
+
+    /// <summary>The <see cref="LayerManifest.Type"/> value for an editable text layer.</summary>
+    /// <remarks>
+    /// Added without a version bump, and safely so. A text layer stores its rendered glyphs
+    /// in an ordinary cel like every other leaf layer, and an older build that does not know
+    /// this name falls back to reading it as a raster layer — so the text is still visible,
+    /// still exports, and still saves; it simply cannot be re-edited as words. That is the
+    /// exact behaviour the "unrecognised values fall back rather than fail" rule exists to
+    /// produce.
+    /// </remarks>
+    public const string TextLayerType = "text";
 }

@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using XPXel.Core.Editing;
+using XPXel.Core.Text;
 using XPXel.Core.Tools;
 using XPXel.Formats;
+using XPXel.Formats.Animation;
 using XPXel.Formats.Png;
 using XPXel.Formats.Project;
 using XPXel.UI.Services;
@@ -62,6 +64,10 @@ public static class AppServices
     {
         services.AddSingleton<ToolSettings>();
         services.AddSingleton<ColorSlots>();
+
+        // Onion skinning is a working aid rather than artwork, so it lives with the other
+        // application-wide state and is never written to a project file.
+        services.AddSingleton<XPXel.Core.Animation.OnionSkinSettings>();
     }
 
     /// <summary>
@@ -71,9 +77,15 @@ public static class AppServices
     private static void AddTools(IServiceCollection services)
     {
         services.AddSingleton<ITool, PencilTool>();
+        services.AddSingleton<ITool, BrushTool>();
         services.AddSingleton<ITool, EraserTool>();
         services.AddSingleton<ITool, BucketFillTool>();
         services.AddSingleton<ITool, EyedropperTool>();
+        services.AddSingleton<ITool, LineTool>();
+        services.AddSingleton<ITool, RectangleTool>();
+        services.AddSingleton<ITool, EllipseTool>();
+        services.AddSingleton<ITool, TextTool>();
+        services.AddSingleton<ITool, RectangleSelectTool>();
 
         services.AddSingleton<ToolRegistry>();
     }
@@ -98,6 +110,28 @@ public static class AppServices
 
         services.AddSingleton<ImageFormatRegistry>();
         services.AddSingleton<DocumentFileService>();
+
+        AddAnimationExporters(services);
+    }
+
+    /// <summary>
+    /// The animation export formats, in the order the export dialog shows them.
+    /// </summary>
+    /// <remarks>
+    /// The sprite sheet is first because it is the format 2D game animation actually ships
+    /// in, and the first entry is the one an artist in a hurry will take. The rest descend in
+    /// order of how likely they are to be what someone wants: a frame sequence always works,
+    /// a GIF is for showing people, an APNG is the same but lossless.
+    /// </remarks>
+    private static void AddAnimationExporters(IServiceCollection services)
+    {
+        services.AddSingleton<IAnimationExporter, SpriteSheetExporter>();
+        services.AddSingleton<IAnimationExporter, PngSequenceExporter>();
+        services.AddSingleton<IAnimationExporter, GifAnimationExporter>();
+        services.AddSingleton<IAnimationExporter, ApngAnimationExporter>();
+
+        services.AddSingleton<AnimationExportRegistry>();
+        services.AddSingleton<AnimationExportService>();
     }
 
     /// <summary>
@@ -108,12 +142,26 @@ public static class AppServices
         services.AddSingleton<IFileDialogService, StorageFileDialogService>();
         services.AddSingleton<IThemeService, ThemeService>();
 
+        // The font engine behind text layers. It is an interface in Core because Core may not
+        // reference a UI framework and there is no portable font rasteriser in the BCL; this
+        // is the Avalonia implementation of it, and the only place that knows what a font is.
+        services.AddSingleton<ITextRasterizer, AvaloniaTextRasterizer>();
+
         // Remembers where the artist left the panels. Registered alongside the theme service
         // because both are preferences that outlive a session.
         services.AddSingleton<DockLayoutStore>();
 
+        // One player for the application: the timeline and the preview both drive it, and two
+        // clocks would drift apart.
+        services.AddSingleton<AnimationPlaybackService>();
+
         // Forgetful by default. A head that can persist settings registers its own store.
         services.AddSingleton<ISettingsStore, InMemorySettingsStore>();
+
+        // Likewise for backups: a head with somewhere to put them registers a real store, and
+        // one without still runs, saying honestly that it keeps none.
+        services.AddSingleton<IAutosaveStore, NullAutosaveStore>();
+        services.AddSingleton<AutosaveService>();
     }
 
     private static void AddViewModels(IServiceCollection services)
@@ -125,6 +173,10 @@ public static class AppServices
         services.AddSingleton<ToolboxViewModel>();
         services.AddSingleton<LayersViewModel>();
         services.AddSingleton<PaletteViewModel>();
+        services.AddSingleton<BrushPanelViewModel>();
+        services.AddSingleton<TextPanelViewModel>();
+        services.AddSingleton<TimelineViewModel>();
+        services.AddSingleton<PreviewPanelViewModel>();
         services.AddSingleton<MainViewModel>();
     }
 }

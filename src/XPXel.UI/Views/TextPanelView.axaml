@@ -1,0 +1,146 @@
+<!--
+  The text panel.
+
+  Laid out the way a word processor's formatting bar is, because that is the layout every
+  artist already knows: family and size on one line, then the B / I / U / S row, then
+  alignment, then the settings specific to pixel art.
+
+  Every control here is a discrete action - a stepper, a checkbox, a choice from a list - and
+  each one is a single undo entry. There is deliberately no slider: dragging one would record
+  a hundred entries for a decision the artist made once.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:XPXel.UI.Converters"
+             xmlns:text="using:XPXel.Core.Text"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.TextPanelView"
+             x:DataType="vm:TextPanelViewModel">
+
+  <ScrollViewer>
+    <StackPanel Margin="8,6,8,10" Spacing="8">
+
+      <TextBlock Text="{Binding TargetDescription}"
+                 Classes="subtle"
+                 TextWrapping="Wrap" />
+
+      <!-- ============================================================================
+           The words
+           ============================================================================ -->
+      <StackPanel Spacing="4" IsVisible="{Binding HasTarget}">
+        <TextBlock Text="TEXT" Classes="panelHeader" Margin="0" />
+        <!-- LostFocus rather than PropertyChanged: committing on every keystroke would put
+             one undo entry in the history per letter typed into this box. Typing on the
+             canvas is the fast path and does its own thing; this box is for corrections. -->
+        <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                 AcceptsReturn="True"
+                 TextWrapping="Wrap"
+                 MinHeight="56"
+                 MaxHeight="120" />
+      </StackPanel>
+
+      <!-- ============================================================================
+           Font and size
+           ============================================================================ -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="FONT" Classes="panelHeader" Margin="0" />
+        <ComboBox ItemsSource="{Binding FontFamilies}"
+                  SelectedItem="{Binding FontFamily, Mode=TwoWay}"
+                  HorizontalAlignment="Stretch" />
+
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+          <ComboBox Grid.Column="0"
+                    ItemsSource="{x:Static vm:TextPanelViewModel.FontSizes}"
+                    SelectedItem="{Binding FontSize, Mode=TwoWay}"
+                    HorizontalAlignment="Stretch"
+                    ToolTip.Tip="Font size in pixels" />
+          <NumericUpDown Grid.Column="1"
+                         Value="{Binding FontSize, Mode=TwoWay}"
+                         Minimum="4" Maximum="512" Increment="1"
+                         FormatString="0.##"
+                         ShowButtonSpinner="False"
+                         Width="58" />
+        </Grid>
+      </StackPanel>
+
+      <!-- ============================================================================
+           Weight, slant and decoration
+           ============================================================================ -->
+      <StackPanel Orientation="Horizontal" Spacing="4">
+        <ToggleButton Classes="format" IsChecked="{Binding IsBold, Mode=TwoWay}" ToolTip.Tip="Bold">
+          <TextBlock Text="B" FontWeight="Bold" />
+        </ToggleButton>
+        <ToggleButton Classes="format" IsChecked="{Binding IsItalic, Mode=TwoWay}" ToolTip.Tip="Italic">
+          <TextBlock Text="I" FontStyle="Italic" />
+        </ToggleButton>
+        <ToggleButton Classes="format" IsChecked="{Binding IsUnderline, Mode=TwoWay}" ToolTip.Tip="Underline">
+          <TextBlock Text="U" TextDecorations="Underline" />
+        </ToggleButton>
+        <ToggleButton Classes="format" IsChecked="{Binding IsStrikethrough, Mode=TwoWay}" ToolTip.Tip="Strikethrough">
+          <TextBlock Text="S" TextDecorations="Strikethrough" />
+        </ToggleButton>
+      </StackPanel>
+
+      <!-- ============================================================================
+           Alignment
+           ============================================================================ -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="ALIGNMENT" Classes="panelHeader" Margin="0" />
+        <StackPanel Orientation="Horizontal" Spacing="4">
+          <RadioButton Classes="format" GroupName="TextAlign" ToolTip.Tip="Align left"
+                       IsChecked="{Binding Alignment, Mode=TwoWay, Converter={x:Static conv:EnumMatchConverter.Instance}, ConverterParameter={x:Static text:TextAlignment.Left}}">
+            <Path Data="M3 5 H17 M3 9 H12 M3 13 H17 M3 17 H12"
+                  Stroke="{Binding $parent[RadioButton].Foreground}" StrokeThickness="1.5" StrokeLineCap="Round"
+                  Width="20" Height="20" Stretch="Uniform" />
+          </RadioButton>
+          <RadioButton Classes="format" GroupName="TextAlign" ToolTip.Tip="Align centre"
+                       IsChecked="{Binding Alignment, Mode=TwoWay, Converter={x:Static conv:EnumMatchConverter.Instance}, ConverterParameter={x:Static text:TextAlignment.Center}}">
+            <Path Data="M3 5 H17 M6 9 H14 M3 13 H17 M6 17 H14"
+                  Stroke="{Binding $parent[RadioButton].Foreground}" StrokeThickness="1.5" StrokeLineCap="Round"
+                  Width="20" Height="20" Stretch="Uniform" />
+          </RadioButton>
+          <RadioButton Classes="format" GroupName="TextAlign" ToolTip.Tip="Align right"
+                       IsChecked="{Binding Alignment, Mode=TwoWay, Converter={x:Static conv:EnumMatchConverter.Instance}, ConverterParameter={x:Static text:TextAlignment.Right}}">
+            <Path Data="M3 5 H17 M8 9 H17 M3 13 H17 M8 17 H17"
+                  Stroke="{Binding $parent[RadioButton].Foreground}" StrokeThickness="1.5" StrokeLineCap="Round"
+                  Width="20" Height="20" Stretch="Uniform" />
+          </RadioButton>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- ============================================================================
+           Colour and spacing
+           ============================================================================ -->
+      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
+        <Border Grid.Column="0"
+                Width="32" Height="32"
+                Background="{Binding ColorBrush}"
+                BorderBrush="{DynamicResource XpPanelBorderBrush}"
+                BorderThickness="1"
+                ToolTip.Tip="The colour the glyphs are drawn in" />
+        <Button Grid.Column="1"
+                Content="Use primary colour"
+                Command="{Binding UsePrimaryColorCommand}"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center" />
+      </Grid>
+
+      <!-- The label sits above rather than beside the field. A docked panel can be narrow,
+           and a label competing for the same row squeezes the number out of sight entirely. -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="LINE SPACING" Classes="panelHeader" Margin="0" />
+        <NumericUpDown Value="{Binding LineSpacing, Mode=TwoWay}"
+                       Minimum="0.5" Maximum="4" Increment="0.1"
+                       FormatString="0.0#"
+                       HorizontalAlignment="Stretch"
+                       ToolTip.Tip="A multiplier on the font's own line height, where 1 is single spacing" />
+      </StackPanel>
+
+      <CheckBox IsChecked="{Binding IsAntiAliased, Mode=TwoWay}"
+                Content="Smooth glyph edges"
+                ToolTip.Tip="Off keeps every pixel either the chosen colour or nothing, which is what sprite work needs. Turn it on for larger type." />
+
+    </StackPanel>
+  </ScrollViewer>
+
+</UserControl>

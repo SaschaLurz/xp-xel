@@ -19,4 +19,11 @@ public enum LayerDropPosition
 
     /// <summary>The dragged layer would be placed below this row.</summary>
     Below,
+
+    /// <summary>
+    /// The dragged layer would be moved inside this row's folder. Only folder rows ever
+    /// report this, and only for the middle band of the row — the top and bottom quarters
+    /// still restack, so a layer can be dropped beside a folder as well as into it.
+    /// </summary>
+    Inside,
 }

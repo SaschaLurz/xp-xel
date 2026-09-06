@@ -37,6 +37,26 @@ public interface IFileDialogService
         string title,
         IReadOnlyList<FormatDescriptor> formats,
         string suggestedName);
+
+    /// <summary>Asks the artist to choose a folder to write several files into.</summary>
+    /// <param name="title">The dialog title.</param>
+    /// <returns>The chosen folder, or <see langword="null"/> if the artist cancelled.</returns>
+    /// <remarks>
+    /// Needed because an animation export is usually not one file: a sprite sheet is an image
+    /// plus its metadata, and a frame sequence is one file per frame. Asking for a folder once
+    /// is far better than a save dialog per file.
+    /// </remarks>
+    Task<IStorageFolder?> PickFolderAsync(string title);
+
+    /// <summary>Opens a folder in the system's own file browser.</summary>
+    /// <param name="path">The folder to show.</param>
+    /// <returns><see langword="true"/> if the platform opened it.</returns>
+    /// <remarks>
+    /// For the autosave folder, which is only useful if the artist can actually get to it.
+    /// Separate from the pickers because nothing is being chosen: the answer comes back to the
+    /// artist, not to the caller.
+    /// </remarks>
+    Task<bool> RevealFolderAsync(string path);
 }
 
 /// <summary>
@@ -86,6 +106,44 @@ public sealed class StorageFileDialogService : IFileDialogService
             ShowOverwritePrompt = true,
             FileTypeChoices = BuildFilters(formats, includeCombinedEntry: false),
         }).ConfigureAwait(true);
+    }
+
+    /// <inheritdoc />
+    public async Task<IStorageFolder?> PickFolderAsync(string title)
+    {
+        if (ResolveTopLevel()?.StorageProvider is not { } provider)
+        {
+            return null;
+        }
+
+        IReadOnlyList<IStorageFolder> folders = await provider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+        }).ConfigureAwait(true);
+
+        return folders.Count > 0 ? folders[0] : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RevealFolderAsync(string path)
+    {
+        if (string.IsNullOrEmpty(path) || ResolveTopLevel()?.Launcher is not { } launcher)
+        {
+            return false;
+        }
+
+        try
+        {
+            // Created on the way in, because a backup folder that has never been written to
+            // does not exist yet, and no platform will open a folder that is not there.
+            Directory.CreateDirectory(path);
+            return await launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(path)).ConfigureAwait(true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

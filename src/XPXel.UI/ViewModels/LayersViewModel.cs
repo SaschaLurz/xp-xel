@@ -144,17 +144,100 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         SelectLayer(copy);
     }
 
-    /// <summary>Deletes the selected layer. The last remaining layer cannot be deleted.</summary>
+    /// <summary>Deletes a layer. The last remaining top-level layer cannot be deleted.</summary>
+    /// <param name="row">
+    /// The layer to delete, or <see langword="null"/> for the selected one. Dropping a row
+    /// onto the delete button passes it explicitly: the layer in the artist's hand is not
+    /// necessarily the one that happens to be selected, and deleting the wrong layer is about
+    /// the worst thing this panel could do.
+    /// </param>
     [RelayCommand(CanExecute = nameof(CanDeleteLayer))]
-    private void DeleteLayer()
+    private void DeleteLayer(LayerItemViewModel? row)
     {
-        if (_workspace is not { } workspace || SelectedLayer is not { } selected)
+        if (_workspace is not { } workspace || (row ?? SelectedLayer) is not { } target)
         {
             return;
         }
 
-        workspace.History.Execute(new RemoveLayerCommand("Delete Layer", workspace.Document, selected.Layer));
+        // The guard is repeated here rather than left to CanExecute, because a drop invokes
+        // the command directly and CanExecute only ever considers the selected layer.
+        if (!CanDelete(workspace, target))
+        {
+            return;
+        }
+
+        workspace.History.Execute(new RemoveLayerCommand("Delete Layer", workspace.Document, target.Layer));
         SelectedLayer = Layers.FirstOrDefault();
+    }
+
+    /// <summary>Adds an empty folder above the selected layer and selects it.</summary>
+    [RelayCommand(CanExecute = nameof(HasDocument))]
+    private void AddFolder()
+    {
+        if (_workspace is not { } workspace)
+        {
+            return;
+        }
+
+        PixelDocument document = workspace.Document;
+        GroupLayer parent = SelectedLayer?.Layer.Parent ?? document.Root;
+        int index = SelectedLayer is null ? parent.Children.Count : parent.IndexOf(SelectedLayer.Layer) + 1;
+
+        GroupLayer folder = new(Guid.NewGuid(), NextFolderName(document));
+        workspace.History.Execute(new AddLayerCommand("Add Folder", document, folder, parent, index));
+
+        SelectLayer(folder);
+    }
+
+    /// <summary>
+    /// Creates a folder in a layer's own place and moves that layer inside it, as one
+    /// undoable step. This is what dropping a row onto the "new folder" button does.
+    /// </summary>
+    /// <param name="row">The layer to wrap, or <see langword="null"/> for the selected one.</param>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void GroupIntoFolder(LayerItemViewModel? row)
+    {
+        if (_workspace is not { } workspace || (row ?? SelectedLayer) is not { } target)
+        {
+            return;
+        }
+
+        GroupLayer folder = new(Guid.NewGuid(), NextFolderName(workspace.Document));
+        workspace.History.Execute(new GroupLayersCommand("Group Layer", workspace.Document, folder, target.Layer));
+
+        SelectLayer(target.Layer);
+    }
+
+    /// <summary>Moves a layer into a folder, on top of whatever the folder already holds.</summary>
+    /// <param name="source">The row being dragged.</param>
+    /// <param name="folder">The folder row it was dropped on.</param>
+    public void MoveIntoFolder(LayerItemViewModel source, LayerItemViewModel folder)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(folder);
+
+        if (_workspace is not { } workspace
+            || folder.Layer is not GroupLayer group
+            || ReferenceEquals(source, folder))
+        {
+            return;
+        }
+
+        // Dropping a folder inside itself, or inside one of its own descendants, would
+        // detach that whole subtree from the document. GroupLayer refuses it as well, but
+        // stopping here avoids pushing a command that would throw when redone.
+        if (source.Layer is GroupLayer dragged && IsDescendantOf(group, dragged))
+        {
+            return;
+        }
+
+        // The top of a folder as displayed is its highest index, because the panel shows the
+        // stack in reverse. Dropping onto a folder therefore lands the layer on top of its
+        // contents, which is where an artist expects a newly added layer to go.
+        workspace.History.Execute(new MoveLayerCommand(
+            "Move Into Folder", workspace.Document, source.Layer, group, group.Children.Count));
+
+        SelectLayer(source.Layer);
     }
 
     /// <summary>Moves the selected layer one position up the stack.</summary>
@@ -169,11 +252,16 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
 
     private bool HasSelection() => _workspace is not null && SelectedLayer is not null;
 
+    private bool CanDeleteLayer() => HasSelection() && CanDelete(_workspace!, SelectedLayer!);
+
     /// <summary>
-    /// A document must always keep at least one layer, otherwise there is nowhere to draw
-    /// and the artist is left with a canvas that silently ignores every stroke.
+    /// A document must always keep at least one top-level layer, otherwise there is nowhere
+    /// to draw and the artist is left with a canvas that silently ignores every stroke. A
+    /// layer inside a folder is always removable, because the folder stays behind.
     /// </summary>
-    private bool CanDeleteLayer() => HasSelection() && _workspace!.Document.Root.Children.Count > 1;
+    private static bool CanDelete(DocumentWorkspace workspace, LayerItemViewModel row) =>
+        workspace.Document.Root.Children.Count > 1
+        || !ReferenceEquals(row.Layer.Parent, workspace.Document.Root);
 
     private void MoveSelected(int delta)
     {
@@ -394,6 +482,8 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     private void NotifyCommandsCanExecuteChanged()
     {
         AddLayerCommand.NotifyCanExecuteChanged();
+        AddFolderCommand.NotifyCanExecuteChanged();
+        GroupIntoFolderCommand.NotifyCanExecuteChanged();
         DuplicateLayerCommand.NotifyCanExecuteChanged();
         DeleteLayerCommand.NotifyCanExecuteChanged();
         MoveLayerUpCommand.NotifyCanExecuteChanged();
@@ -405,5 +495,12 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     {
         int count = document.EnumerateLayers().Count();
         return $"Layer {count + 1}";
+    }
+
+    /// <summary>Produces "Folder 2" style names, counting only the folders.</summary>
+    private static string NextFolderName(PixelDocument document)
+    {
+        int count = document.EnumerateLayers().OfType<GroupLayer>().Count();
+        return $"Folder {count + 1}";
     }
 }

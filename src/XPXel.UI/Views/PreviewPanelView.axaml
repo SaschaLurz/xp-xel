@@ -1,0 +1,82 @@
+<!--
+  The preview panel: the animation at the size it will actually be seen at.
+
+  It shows the same frame the canvas does, because playback moves the document's active frame
+  - so this can never drift out of step with the canvas or the timeline. What it adds is the
+  artwork without the pixel grid, the onion skin ghosts or the selection outline drawn over
+  it, which is the only way to judge whether a walk cycle reads.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.PreviewPanelView"
+             x:DataType="vm:PreviewPanelViewModel">
+
+  <DockPanel LastChildFill="True">
+
+    <Border DockPanel.Dock="Top" Padding="6,4">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+
+        <Button Classes="transport" Command="{Binding Playback.StepBackCommand}" ToolTip.Tip="Previous frame">
+          <Path Classes="transportIcon" Data="M16 5 L8 12 L16 19 Z" />
+        </Button>
+        <ToggleButton Classes="transport"
+                      IsChecked="{Binding Playback.IsPlaying, Mode=OneWay}"
+                      Command="{Binding Playback.ToggleCommand}"
+                      ToolTip.Tip="Play or pause">
+          <Path Classes="transportIcon" Data="M8 5 L19 12 L8 19 Z" />
+        </ToggleButton>
+        <Button Classes="transport" Command="{Binding Playback.StepForwardCommand}" ToolTip.Tip="Next frame">
+          <Path Classes="transportIcon" Data="M8 5 L16 12 L8 19 Z" />
+        </Button>
+
+        <Border Classes="separator" />
+
+        <ComboBox ItemsSource="{x:Static vm:PreviewPanelViewModel.ZoomLevels}"
+                  SelectedItem="{Binding Zoom, Mode=TwoWay}"
+                  Width="66"
+                  ToolTip.Tip="Preview magnification">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="x:Int32">
+              <TextBlock Text="{Binding StringFormat='{}{0}×'}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+
+      </StackPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="6,4">
+      <StackPanel Spacing="4">
+        <CheckBox IsChecked="{Binding ShowCheckerboard, Mode=TwoWay}"
+                  Content="Show transparency"
+                  ToolTip.Tip="Turn it off to judge the silhouette against a flat ground" />
+        <CheckBox IsChecked="{Binding Playback.PlaysWholeTimeline, Mode=TwoWay}"
+                  Content="Play whole timeline"
+                  ToolTip.Tip="Ignore the selected animation and run every frame in the document" />
+        <TextBlock Text="{Binding CaptionText}" Classes="subtle" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <!-- The artwork itself, centred and magnified with nearest-neighbour sampling so the
+         pixels stay square. -->
+    <Border Background="{DynamicResource XpCanvasBackgroundBrush}" ClipToBounds="True">
+      <Border HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              Width="{Binding DisplayWidth}"
+              Height="{Binding DisplayHeight}"
+              BorderBrush="{DynamicResource XpCanvasBorderBrush}"
+              BorderThickness="1">
+        <Panel>
+          <Border Background="{DynamicResource XpThumbnailCheckerBrush}"
+                  IsVisible="{Binding ShowCheckerboard}" />
+          <Image Source="{Binding Image}"
+                 RenderOptions.BitmapInterpolationMode="None"
+                 Stretch="Fill" />
+        </Panel>
+      </Border>
+    </Border>
+
+  </DockPanel>
+
+</UserControl>

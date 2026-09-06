@@ -14,6 +14,28 @@ public sealed class HistoryTests
     private static readonly PixelColor Blue = new(0, 0, 255);
 
     [Fact]
+    public void TheRevisionMovesWheneverTheHistoryDoes()
+    {
+        DocumentHistory history = new();
+        int start = history.Revision;
+
+        history.Execute(new DelegateCommand("Edit", () => { }, () => { }));
+        int afterEdit = history.Revision;
+        Assert.NotEqual(start, afterEdit);
+
+        history.Undo();
+        int afterUndo = history.Revision;
+        Assert.NotEqual(afterEdit, afterUndo);
+
+        history.Redo();
+        Assert.NotEqual(afterUndo, history.Revision);
+
+        // Undoing back to where a backup was taken has to read as a change, because the
+        // document on disk and the document on screen no longer match.
+        Assert.NotEqual(afterEdit, history.Revision);
+    }
+
+    [Fact]
     public void UndoAndRedoWalkTheHistoryInBothDirections()
     {
         DocumentHistory history = new();

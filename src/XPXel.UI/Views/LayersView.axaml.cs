@@ -10,8 +10,9 @@ using XPXel.UI.ViewModels;
 namespace XPXel.UI.Views;
 
 /// <summary>
-/// Code-behind for the layers panel: drag-and-drop restacking, dropping a layer on the
-/// "new layer" button to duplicate it, and the double-click-to-rename interaction.
+/// Code-behind for the layers panel: drag-and-drop restacking, dropping a layer onto a
+/// folder or onto one of the buttons below the list, and the double-click-to-rename
+/// interaction.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,6 +27,11 @@ namespace XPXel.UI.Views;
 /// format. XP-xel does not accept layers dragged from other applications, so nothing has to
 /// be serialised, and passing the object avoids a lookup by name or index that could go
 /// stale mid-drag.
+/// </para>
+/// <para>
+/// <b>Every drop acts on the dragged row, never on the selected one.</b> Picking a layer up
+/// does not select it, so the two are routinely different; a drop that quietly operated on
+/// the selection would duplicate or — far worse — delete the wrong layer.
 /// </para>
 /// </remarks>
 public partial class LayersView : UserControl
@@ -45,6 +51,15 @@ public partial class LayersView : UserControl
     /// drag and make the list feel unusable.
     /// </summary>
     private const double DragThreshold = 4.0;
+
+    /// <summary>The name of the button that a drop duplicates onto.</summary>
+    private const string NewLayerButtonName = "NewLayerButton";
+
+    /// <summary>The name of the button that a drop wraps a layer in a new folder onto.</summary>
+    private const string NewFolderButtonName = "NewFolderButton";
+
+    /// <summary>The name of the button that a drop deletes onto.</summary>
+    private const string DeleteButtonName = "DeleteLayerButton";
 
     private Point _pressOrigin;
     private LayerItemViewModel? _pressedRow;
@@ -128,8 +143,9 @@ public partial class LayersView : UserControl
 
         try
         {
-            // Move and Copy are both offered because the same drag can end on another row
-            // (a restack) or on the new-layer button (a duplicate).
+            // Move and Copy are both offered because the same drag can end as a restack, a
+            // move into a folder, a delete — all moves — or on the new-layer button, which
+            // copies.
             await DragDrop.DoDragDropAsync(pressArgs, payload, DragDropEffects.Move | DragDropEffects.Copy)
                 .ConfigureAwait(true);
         }
@@ -159,19 +175,26 @@ public partial class LayersView : UserControl
 
         ClearDropIndicators();
 
-        // Dropping on the "new layer" button duplicates rather than moves, so the cursor
-        // should say copy. This is the whole gesture the artist asked for: drag a layer onto
-        // the button that makes layers, get a copy of it.
-        if (IsOverNewLayerButton(e))
+        // The buttons below the list are drop targets in their own right: each one applies
+        // its own operation to the layer in the artist's hand. Duplicating is the only one
+        // that copies, so it is the only one that reports Copy back to the drag source.
+        if (IsOverButton(e, NewLayerButtonName))
         {
             e.DragEffects = DragDropEffects.Copy;
             e.Handled = true;
             return;
         }
 
+        if (IsOverButton(e, NewFolderButtonName) || IsOverButton(e, DeleteButtonName))
+        {
+            e.DragEffects = DragDropEffects.Move;
+            e.Handled = true;
+            return;
+        }
+
         if (FindRow(e.Source as Visual) is { } target && !ReferenceEquals(target, dragged))
         {
-            target.DropPosition = IsAboveMidpoint(e, target) ? LayerDropPosition.Above : LayerDropPosition.Below;
+            target.DropPosition = GetDropPosition(e, target);
             e.DragEffects = DragDropEffects.Move;
         }
         else
@@ -191,16 +214,43 @@ public partial class LayersView : UserControl
             return;
         }
 
-        if (IsOverNewLayerButton(e))
+        // The commands are invoked rather than called through a public method so that each
+        // drop lands one entry on the undo stack, exactly as the equivalent button click
+        // would. Execute bypasses CanExecute, which is deliberate: CanExecute can only ever
+        // look at the selected layer, while these act on the dragged one, so each command
+        // re-checks its own preconditions for the layer it is actually given.
+        if (IsOverButton(e, NewLayerButtonName))
         {
             model.DuplicateLayerCommand.Execute(dragged);
             e.Handled = true;
             return;
         }
 
+        if (IsOverButton(e, NewFolderButtonName))
+        {
+            model.GroupIntoFolderCommand.Execute(dragged);
+            e.Handled = true;
+            return;
+        }
+
+        if (IsOverButton(e, DeleteButtonName))
+        {
+            model.DeleteLayerCommand.Execute(dragged);
+            e.Handled = true;
+            return;
+        }
+
         if (FindRow(e.Source as Visual) is { } target && !ReferenceEquals(target, dragged))
         {
-            model.ReorderLayer(dragged, target, IsAboveMidpoint(e, target));
+            LayerDropPosition position = GetDropPosition(e, target);
+            if (position == LayerDropPosition.Inside)
+            {
+                model.MoveIntoFolder(dragged, target);
+            }
+            else
+            {
+                model.ReorderLayer(dragged, target, position == LayerDropPosition.Above);
+            }
         }
 
         e.Handled = true;
@@ -209,22 +259,49 @@ public partial class LayersView : UserControl
     private void OnDragLeave(object? sender, DragEventArgs e) => ClearDropIndicators();
 
     /// <summary>
-    /// Decides whether the pointer is in the upper or lower half of a row, which is what
-    /// makes the drop land above or below it.
+    /// Decides where a drop on this row would land: above it, below it, or — for a folder —
+    /// inside it.
     /// </summary>
-    private bool IsAboveMidpoint(DragEventArgs e, LayerItemViewModel row)
+    /// <remarks>
+    /// An ordinary row splits at its midpoint, which is the long-established convention for
+    /// a reorderable list. A folder instead gets three bands: the top and bottom quarters
+    /// still restack, and the middle half moves the layer inside. Without the edge bands
+    /// there would be no way to drop a layer <i>beside</i> a folder, which is needed just as
+    /// often as dropping one into it.
+    /// </remarks>
+    private LayerDropPosition GetDropPosition(DragEventArgs e, LayerItemViewModel row)
     {
         if (FindRowContainer(row) is not { } container)
         {
-            return true;
+            return LayerDropPosition.Above;
         }
 
-        return e.GetPosition(container).Y < container.Bounds.Height / 2.0;
+        double height = container.Bounds.Height;
+        double y = e.GetPosition(container).Y;
+
+        if (!row.IsGroup)
+        {
+            return y < height / 2.0 ? LayerDropPosition.Above : LayerDropPosition.Below;
+        }
+
+        return y switch
+        {
+            _ when y < height * 0.25 => LayerDropPosition.Above,
+            _ when y > height * 0.75 => LayerDropPosition.Below,
+            _ => LayerDropPosition.Inside,
+        };
     }
 
-    private bool IsOverNewLayerButton(DragEventArgs e)
+    /// <summary>Tests the pointer against one of the named buttons below the list.</summary>
+    /// <remarks>
+    /// The buttons are hit-tested by position rather than by handling drops on each button,
+    /// because a Button consumes pointer input for its own press handling and never sees the
+    /// drag events. Coordinates are asked for relative to the button itself, so the test is
+    /// unaffected by where the panel sits or how it has been docked.
+    /// </remarks>
+    private bool IsOverButton(DragEventArgs e, string name)
     {
-        Button button = this.GetControl<Button>("NewLayerButton");
+        Button button = this.GetControl<Button>(name);
         Point local = e.GetPosition(button);
         return local.X >= 0 && local.Y >= 0 && local.X < button.Bounds.Width && local.Y < button.Bounds.Height;
     }

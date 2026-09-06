@@ -86,21 +86,36 @@ public sealed class Palette : ObservableModel
     public int IndexOf(PixelColor color) => _colors.IndexOf(color);
 
     /// <summary>
-    /// Creates the palette assigned to a new document: DawnBringer's 16-colour palette,
-    /// a widely used public-domain starting point for pixel art that covers a full range of
-    /// hues and values in very few entries.
+    /// How many of the leading colours are reachable by a number key.
     /// </summary>
-    /// <returns>A new palette containing sixteen colours.</returns>
+    /// <remarks>
+    /// Ten, because that is how many digits a keyboard has in a row: the first nine answer to
+    /// <c>1</c> through <c>9</c> and the tenth to <c>0</c>, the arrangement every game with a
+    /// hotbar uses. Colours past the tenth are still perfectly usable, they simply have to be
+    /// clicked.
+    /// </remarks>
+    public const int HotbarSize = 10;
+
+    /// <summary>
+    /// Creates the palette assigned to a new document: black, white and the rainbow.
+    /// </summary>
+    /// <returns>A new palette containing <see cref="HotbarSize"/> colours.</returns>
+    /// <remarks>
+    /// These fill the number keys, so the order is the one a person would recite rather than
+    /// anything perceptual: black, white, then round the wheel from red. A curated pixel-art
+    /// palette such as DawnBringer's DB16 is a better place to *finish* a sprite, but it is a
+    /// poor place to start when the artist is still learning which key is which — every
+    /// entry is a muted, unfamiliar hue with no name.
+    /// </remarks>
     public static Palette CreateDefault()
     {
-        Palette palette = new("DB16");
+        Palette palette = new("Default");
 
         ReadOnlySpan<uint> rgb =
         [
-            0x140C1C, 0x442434, 0x30346D, 0x4E4A4E,
-            0x854C30, 0x346524, 0xD04648, 0x757161,
-            0x597DCE, 0xD27D2C, 0x8595A1, 0x6DAA2C,
-            0xD2AA99, 0x6DC2CA, 0xDAD45E, 0xDEEED6,
+            0x000000, 0xFFFFFF,
+            0xE43B44, 0xF77622, 0xFEE761, 0x63C74D,
+            0x2CE8F5, 0x0099DB, 0x8B5FBF, 0xEC3F8B,
         ];
 
         foreach (uint value in rgb)

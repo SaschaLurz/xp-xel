@@ -26,7 +26,9 @@ public sealed class DocumentWorkspace : ObservableModel
 {
     private LayerNode? _activeLayer;
     private Frame _activeFrame;
+    private AnimationTag? _activeTag;
     private SelectionMask? _selection;
+    private TextEditSession? _activeTextEdit;
     private string? _filePath;
 
     /// <summary>Opens a workspace over a document.</summary>
@@ -50,6 +52,8 @@ public sealed class DocumentWorkspace : ObservableModel
         History.Changed += OnHistoryChanged;
     }
 
+    private int _previousFrameIndex;
+
     /// <summary>The document being edited.</summary>
     public PixelDocument Document { get; }
 
@@ -65,6 +69,7 @@ public sealed class DocumentWorkspace : ObservableModel
             if (SetProperty(ref _activeLayer, value))
             {
                 OnPropertyChanged(nameof(ActiveRasterLayer));
+                OnPropertyChanged(nameof(ActiveTextLayer));
                 OnPropertyChanged(nameof(CanEditActiveLayer));
             }
         }
@@ -77,6 +82,156 @@ public sealed class DocumentWorkspace : ObservableModel
     public RasterLayer? ActiveRasterLayer => _activeLayer as RasterLayer;
 
     /// <summary>
+    /// The active layer if it is a text layer, otherwise <see langword="null"/>. The text
+    /// panel binds to this to know whose typography it is editing.
+    /// </summary>
+    public TextLayer? ActiveTextLayer => _activeLayer as TextLayer;
+
+    /// <summary>
+    /// The text layer currently being typed into, or <see langword="null"/> when no text is
+    /// being edited.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This lives on the workspace rather than on the text tool for two reasons. Tools are
+    /// singletons shared by every open document, so per-document state cannot live on one;
+    /// and keystrokes arrive at the canvas control, which needs somewhere to route them that
+    /// does not require it to understand how text is stored.
+    /// </para>
+    /// <para>
+    /// Assign through <see cref="BeginTextEdit"/> and <see cref="CommitTextEdit"/> rather
+    /// than directly, so that starting a second edit cannot silently discard the first.
+    /// </para>
+    /// </remarks>
+    public TextEditSession? ActiveTextEdit
+    {
+        get => _activeTextEdit;
+        private set => SetProperty(ref _activeTextEdit, value);
+    }
+
+    /// <summary>
+    /// Starts typing into a text layer, first finishing any edit already in progress.
+    /// </summary>
+    /// <param name="session">The session to start.</param>
+    public void BeginTextEdit(TextEditSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        CommitTextEdit();
+        ActiveTextEdit = session;
+    }
+
+    /// <summary>
+    /// Finishes any text edit in progress, recording it as one entry in the history.
+    /// </summary>
+    /// <returns><see langword="true"/> if an edit was in progress and recorded a change.</returns>
+    /// <remarks>
+    /// Safe to call when nothing is being edited, which matters because it is called
+    /// defensively from several places: switching tool, switching document tab, saving, and
+    /// clicking somewhere else on the canvas.
+    /// </remarks>
+    public bool CommitTextEdit()
+    {
+        if (ActiveTextEdit is not { } session)
+        {
+            return false;
+        }
+
+        // Cleared first, so that anything reacting to the history push sees no edit in
+        // progress rather than one that is halfway through ending.
+        ActiveTextEdit = null;
+        return session.Commit();
+    }
+
+    /// <summary>Abandons any text edit in progress, restoring what was there before it.</summary>
+    public void CancelTextEdit()
+    {
+        if (ActiveTextEdit is not { } session)
+        {
+            return;
+        }
+
+        ActiveTextEdit = null;
+        session.Cancel();
+    }
+
+    /// <summary>
+    /// The selected pixels currently lifted off the layer and being dragged, or
+    /// <see langword="null"/> when nothing is being moved.
+    /// </summary>
+    /// <remarks>
+    /// Lives here for the same two reasons the text edit does: tools are singletons shared by
+    /// every open document and so cannot hold per-document state, and the canvas needs somewhere
+    /// to route a drag that does not require it to understand how pixels are stored.
+    /// </remarks>
+    public SelectionTransform? ActiveTransform
+    {
+        get => _activeTransform;
+        private set => SetProperty(ref _activeTransform, value);
+    }
+
+    /// <summary>Lifts the selected pixels so they can be dragged around.</summary>
+    /// <returns>
+    /// <see langword="true"/> if something is now being moved — including when a move was
+    /// already in progress, which is left alone rather than restarted.
+    /// </returns>
+    public bool BeginTransform()
+    {
+        if (ActiveTransform is not null)
+        {
+            return true;
+        }
+
+        if (SelectionTransform.Begin(this) is not { } transform)
+        {
+            return false;
+        }
+
+        ActiveTransform = transform;
+        return true;
+    }
+
+    /// <summary>
+    /// Puts down whatever is being moved, recording the whole drag as one history entry.
+    /// </summary>
+    /// <returns><see langword="true"/> if a move was in progress and actually moved something.</returns>
+    /// <remarks>
+    /// Safe to call when nothing is being moved, because it is called defensively from
+    /// everywhere a move must not survive: switching tool, switching tab, and saving.
+    /// </remarks>
+    public bool CommitTransform()
+    {
+        if (ActiveTransform is not { } transform)
+        {
+            return false;
+        }
+
+        // Cleared first, so anything reacting to the history push sees no move in progress
+        // rather than one that is halfway through ending.
+        ActiveTransform = null;
+
+        if (transform.Commit() is not { } command)
+        {
+            return false;
+        }
+
+        History.Push(command);
+        return true;
+    }
+
+    /// <summary>Abandons a move, putting the pixels back where they came from.</summary>
+    public void CancelTransform()
+    {
+        if (ActiveTransform is not { } transform)
+        {
+            return;
+        }
+
+        ActiveTransform = null;
+        transform.Cancel();
+    }
+
+    /// <summary>
     /// Gets a value indicating whether drawing is currently possible: there is an active
     /// raster layer and it is neither locked nor hidden.
     /// </summary>
@@ -87,11 +242,70 @@ public sealed class DocumentWorkspace : ObservableModel
     public bool CanEditActiveLayer =>
         ActiveRasterLayer is { IsLocked: false } layer && layer.IsEffectivelyVisible;
 
-    /// <summary>The frame being edited. Always exactly one frame in v0.1.</summary>
+    /// <summary>The frame being edited.</summary>
     public Frame ActiveFrame
     {
         get => _activeFrame;
-        set => SetProperty(ref _activeFrame, value ?? throw new ArgumentNullException(nameof(value)));
+        set
+        {
+            if (SetProperty(ref _activeFrame, value ?? throw new ArgumentNullException(nameof(value))))
+            {
+                OnPropertyChanged(nameof(ActiveFrameIndex));
+            }
+        }
+    }
+
+    /// <summary>The active frame's position in the timeline, or 0 if it has somehow left it.</summary>
+    public int ActiveFrameIndex => Math.Max(0, Document.IndexOfFrame(_activeFrame));
+
+    /// <summary>
+    /// The animation currently being worked on, or <see langword="null"/> when the whole
+    /// timeline is treated as one.
+    /// </summary>
+    /// <remarks>
+    /// This is what the preview plays and what onion skinning is allowed to reach across. It
+    /// is editing state rather than artwork, which is why it lives here and not on the
+    /// document alongside the tag list itself.
+    /// </remarks>
+    public AnimationTag? ActiveTag
+    {
+        get => _activeTag;
+        set => SetProperty(ref _activeTag, value);
+    }
+
+    /// <summary>Moves to a frame by its position, clamped to the timeline.</summary>
+    /// <param name="index">The position to move to.</param>
+    /// <returns>The frame that is now active.</returns>
+    public Frame GoToFrame(int index)
+    {
+        int clamped = Math.Clamp(index, 0, Document.Frames.Count - 1);
+        ActiveFrame = Document.Frames[clamped];
+        return ActiveFrame;
+    }
+
+    /// <summary>
+    /// Puts the active frame and tag back onto something that still exists, after the
+    /// timeline has been changed underneath them.
+    /// </summary>
+    /// <remarks>
+    /// Deleting the frame being edited, or undoing the addition of one, leaves the workspace
+    /// pointing at a frame the document has never heard of — and every cel lookup after that
+    /// silently returns nothing, so the canvas goes blank with no error. Callers that change
+    /// the timeline call this afterwards.
+    /// </remarks>
+    public void EnsureValidFrame()
+    {
+        if (!Document.Frames.Contains(_activeFrame))
+        {
+            ActiveFrame = Document.Frames[Math.Clamp(_previousFrameIndex, 0, Document.Frames.Count - 1)];
+        }
+
+        _previousFrameIndex = ActiveFrameIndex;
+
+        if (_activeTag is { } tag && !Document.Tags.Contains(tag))
+        {
+            ActiveTag = null;
+        }
     }
 
     /// <summary>
@@ -130,6 +344,8 @@ public sealed class DocumentWorkspace : ObservableModel
     /// Gets a value indicating whether the document differs from what was last saved.
     /// </summary>
     public bool HasUnsavedChanges => !History.IsAtSavedState;
+
+    private SelectionTransform? _activeTransform;
 
     /// <summary>
     /// Returns the cel the active layer occupies on the active frame, creating it on first

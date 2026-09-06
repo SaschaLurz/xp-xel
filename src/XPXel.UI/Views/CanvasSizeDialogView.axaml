@@ -1,0 +1,96 @@
+<!--
+  The canvas size dialog: crop or enlarge the canvas, and say which part of the artwork
+  keeps its place.
+
+  The anchor grid is an ItemsControl over the dialog's nine options rather than nine
+  hand-placed buttons, so the cells lay themselves out in reading order and a tooltip on each
+  says what it does. The selected cell is a checked ToggleButton, which gives the accent
+  highlight from the theme without a converter.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:sys="using:System"
+             x:Class="XPXel.UI.Views.CanvasSizeDialogView"
+             x:DataType="dialogs:CanvasSizeDialogViewModel">
+
+  <Border Classes="dialogSurface">
+    <StackPanel Spacing="14" MinWidth="330">
+
+      <StackPanel Spacing="2">
+        <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+
+        <!-- Says in words what the numbers above will do, including the word "cropped", so
+             that losing pixels is never a surprise. -->
+        <TextBlock Text="{Binding SummaryText}" Classes="subtle" />
+      </StackPanel>
+
+      <Grid ColumnDefinitions="Auto,*,Auto,*" RowDefinitions="Auto">
+        <TextBlock Grid.Column="0" Text="Width" VerticalAlignment="Center" Classes="subtle" />
+        <NumericUpDown Grid.Column="1" Margin="8,0,16,0"
+                       Minimum="1" Maximum="4096" Increment="1" FormatString="0"
+                       Value="{Binding Width, Mode=TwoWay}" />
+        <TextBlock Grid.Column="2" Text="Height" VerticalAlignment="Center" Classes="subtle" />
+        <NumericUpDown Grid.Column="3" Margin="8,0,0,0"
+                       Minimum="1" Maximum="4096" Increment="1" FormatString="0"
+                       Value="{Binding Height, Mode=TwoWay}" />
+      </Grid>
+
+      <StackPanel>
+        <TextBlock Text="Presets" Classes="subtle" Margin="0,0,0,4" />
+        <ItemsControl ItemsSource="{x:Static dialogs:CanvasSizeDialogViewModel.Presets}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="sys:Int32">
+              <Button Margin="0,0,4,4"
+                      MinWidth="52"
+                      Content="{Binding}"
+                      Command="{Binding $parent[ItemsControl].((dialogs:CanvasSizeDialogViewModel)DataContext).ApplyPresetCommand}"
+                      CommandParameter="{Binding}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <StackPanel>
+        <TextBlock Text="Anchor" Classes="subtle" Margin="0,0,0,4" />
+        <TextBlock Text="Which part of the artwork keeps its place"
+                   Classes="subtle"
+                   FontSize="11"
+                   Margin="0,0,0,6" />
+
+        <ItemsControl ItemsSource="{Binding Anchors}" HorizontalAlignment="Left">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Rows="3" Columns="3" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="dialogs:CanvasAnchorOption">
+              <ToggleButton Width="30"
+                            Height="30"
+                            Margin="1"
+                            Padding="0"
+                            IsChecked="{Binding IsSelected}"
+                            ToolTip.Tip="{Binding Description}"
+                            Command="{Binding $parent[ItemsControl].((dialogs:CanvasSizeDialogViewModel)DataContext).SetAnchorCommand}"
+                            CommandParameter="{Binding Anchor}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Reset" Command="{Binding ResetCommand}" />
+        <Button Content="Cancel" Command="{Binding CancelCommand}" />
+        <Button Content="Resize" IsDefault="True" Command="{Binding ResizeCommand}" />
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+
+</UserControl>

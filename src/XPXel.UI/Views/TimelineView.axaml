@@ -1,0 +1,287 @@
+<!--
+  The timeline: frames across the top, layers down the side, one cell per cel.
+
+  The grid is the document model drawn on screen - a cel is the intersection of one layer and
+  one frame - which is why it is this shape rather than a simple row of frames. It is what
+  lets a background stay still while only the legs move.
+
+  Layout note: the frame headers and the layer rows scroll together horizontally because they
+  live inside one shared ScrollViewer, with the layer-name column pinned outside it. Two
+  scrollers synchronised by code would drift by a pixel whenever one of them was resized.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:XPXel.UI.Converters"
+             xmlns:docs="using:XPXel.Core.Documents"
+             xmlns:vm="using:XPXel.UI.ViewModels"
+             x:Class="XPXel.UI.Views.TimelineView"
+             x:DataType="vm:TimelineViewModel">
+
+  <DockPanel LastChildFill="True">
+
+    <!-- ================================================================================
+         Transport and frame commands
+         ================================================================================ -->
+    <Border DockPanel.Dock="Top" Classes="panel" Padding="6,4" BorderThickness="0,0,0,1">
+      <StackPanel Orientation="Horizontal" Spacing="10">
+
+        <StackPanel Orientation="Horizontal" Spacing="2">
+          <Button Classes="transport" Command="{Binding Playback.GoToStartCommand}" ToolTip.Tip="First frame">
+            <Path Classes="transportIcon" Data="M7 5 L7 19 M19 5 L9 12 L19 19 Z" />
+          </Button>
+          <Button Classes="transport" Command="{Binding Playback.StepBackCommand}" ToolTip.Tip="Previous frame">
+            <Path Classes="transportIcon" Data="M16 5 L8 12 L16 19 Z" />
+          </Button>
+          <ToggleButton Classes="transport"
+                        IsChecked="{Binding Playback.IsPlaying, Mode=OneWay}"
+                        Command="{Binding Playback.ToggleCommand}"
+                        ToolTip.Tip="Play or pause (Space is taken by panning, so use this)">
+            <Path Classes="transportIcon" Data="M8 5 L19 12 L8 19 Z" />
+          </ToggleButton>
+          <Button Classes="transport" Command="{Binding Playback.StepForwardCommand}" ToolTip.Tip="Next frame">
+            <Path Classes="transportIcon" Data="M8 5 L16 12 L8 19 Z" />
+          </Button>
+          <Button Classes="transport" Command="{Binding Playback.GoToEndCommand}" ToolTip.Tip="Last frame">
+            <Path Classes="transportIcon" Data="M17 5 L17 19 M5 5 L15 12 L5 19 Z" />
+          </Button>
+        </StackPanel>
+
+        <Border Classes="separator" />
+
+        <StackPanel Orientation="Horizontal" Spacing="2">
+          <Button Classes="transport" Command="{Binding AddFrameCommand}" ToolTip.Tip="Add an empty frame">
+            <Path Classes="transportIcon" Data="M12 6 L12 18 M6 12 L18 12" />
+          </Button>
+          <Button Classes="transport" Command="{Binding DuplicateFrameCommand}"
+                  ToolTip.Tip="Duplicate this frame — the usual way to draw the next one">
+            <Path Classes="transportIcon" Data="M4 4 L14 4 L14 14 L4 14 Z M8 8 L20 8 L20 20 L8 20 Z" />
+          </Button>
+          <Button Classes="transport" Command="{Binding DeleteFrameCommand}" ToolTip.Tip="Delete this frame">
+            <Path Classes="transportIcon" Data="M6 7 L18 7 M9 7 L9 19 M15 7 L15 19 M5 7 L19 7 L18 20 L6 20 Z" />
+          </Button>
+          <Button Classes="transport" Command="{Binding MoveFrameLeftCommand}" ToolTip.Tip="Move this frame earlier">
+            <Path Classes="transportIcon" Data="M14 6 L8 12 L14 18 M8 12 L19 12" />
+          </Button>
+          <Button Classes="transport" Command="{Binding MoveFrameRightCommand}" ToolTip.Tip="Move this frame later">
+            <Path Classes="transportIcon" Data="M10 6 L16 12 L10 18 M5 12 L16 12" />
+          </Button>
+        </StackPanel>
+
+        <Border Classes="separator" />
+
+        <!-- One number that retimes every frame at once. Per-frame holds are edited in each
+             frame's own header; this is the "make it 12 fps" button an artist reaches for. -->
+        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <TextBlock Text="FPS" Classes="subtle" VerticalAlignment="Center" />
+          <NumericUpDown Value="{Binding FrameRate, Mode=TwoWay}"
+                         Minimum="1" Maximum="120" Increment="1"
+                         FormatString="0"
+                         ShowButtonSpinner="False"
+                         Width="52" />
+          <Button Content="Apply" Command="{Binding ApplyFrameRateCommand}"
+                  ToolTip.Tip="Give every frame of this animation the same hold time" />
+        </StackPanel>
+
+        <Border Classes="separator" />
+
+        <!-- Onion skinning. The controls sit here rather than in the View menu because they
+             are adjusted constantly while animating, not set once. -->
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <CheckBox IsChecked="{Binding OnionSkin.IsEnabled, Mode=TwoWay}"
+                    Content="Onion skin"
+                    ToolTip.Tip="Ghost the neighbouring frames under this one, so poses can be lined up" />
+          <NumericUpDown Value="{Binding OnionSkin.FramesBefore, Mode=TwoWay}"
+                         Minimum="0" Maximum="3" Increment="1"
+                         FormatString="0" ShowButtonSpinner="False" Width="42"
+                         IsEnabled="{Binding OnionSkin.IsEnabled}"
+                         ToolTip.Tip="How many earlier frames to ghost" />
+          <NumericUpDown Value="{Binding OnionSkin.FramesAfter, Mode=TwoWay}"
+                         Minimum="0" Maximum="3" Increment="1"
+                         FormatString="0" ShowButtonSpinner="False" Width="42"
+                         IsEnabled="{Binding OnionSkin.IsEnabled}"
+                         ToolTip.Tip="How many later frames to ghost" />
+        </StackPanel>
+
+        <TextBlock Text="{Binding PositionText}" Classes="subtle" VerticalAlignment="Center" />
+
+      </StackPanel>
+    </Border>
+
+    <!-- ================================================================================
+         Named animations
+         ================================================================================ -->
+    <Border DockPanel.Dock="Bottom" Classes="panel" Padding="6,4" BorderThickness="0,1,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+
+        <TextBlock Text="ANIMATIONS" Classes="panelHeader" Margin="0" VerticalAlignment="Center" />
+
+        <Button Classes="transport" Command="{Binding AddTagCommand}"
+                ToolTip.Tip="Name a range of frames — one file per animation on export">
+          <Path Classes="transportIcon" Data="M12 6 L12 18 M6 12 L18 12" />
+        </Button>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" MaxWidth="420">
+          <ItemsControl ItemsSource="{Binding Tags}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TimelineTagViewModel">
+                <Button Classes="tagChip"
+                        Classes.activeTag="{Binding IsActive}"
+                        Command="{Binding SelectCommand}"
+                        ToolTip.Tip="Work on this animation. Click again to see the whole timeline.">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <Border Width="4" Height="14" CornerRadius="2" Background="{Binding BarBrush}" />
+                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding RangeText}" Classes="subtle" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Editing the animation being worked on. Shown only when one is chosen, because
+             every control here is meaningless without a target. -->
+        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                    IsVisible="{Binding ActiveTag, Converter={x:Static ObjectConverters.IsNotNull}}">
+          <Border Classes="separator" />
+          <TextBox Text="{Binding ActiveTag.Name, Mode=TwoWay}" Width="110"
+                   ToolTip.Tip="The animation's name, which becomes its file name on export" />
+          <NumericUpDown Value="{Binding ActiveTagFrom, Mode=TwoWay}"
+                         Minimum="0" Maximum="{Binding LastFrameIndex}"
+                         FormatString="0" ShowButtonSpinner="False" Width="52"
+                         ToolTip.Tip="First frame, counting from zero" />
+          <NumericUpDown Value="{Binding ActiveTagTo, Mode=TwoWay}"
+                         Minimum="0" Maximum="{Binding LastFrameIndex}"
+                         FormatString="0" ShowButtonSpinner="False" Width="52"
+                         ToolTip.Tip="Last frame, counting from zero" />
+          <ComboBox ItemsSource="{x:Static vm:TimelineViewModel.LoopDirections}"
+                    SelectedItem="{Binding ActiveTag.Direction, Mode=TwoWay}"
+                    Width="106"
+                    ToolTip.Tip="Ping-pong plays forwards then back without repeating the end frames">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="docs:LoopDirection">
+                <TextBlock Text="{Binding Converter={x:Static conv:EnumDisplayConverter.Instance}}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <Button Content="Delete" Command="{Binding DeleteTagCommand}" />
+        </StackPanel>
+
+      </StackPanel>
+    </Border>
+
+    <!-- ================================================================================
+         The cel grid
+         ================================================================================ -->
+    <Grid ColumnDefinitions="110,*" IsVisible="{Binding HasDocument}">
+
+      <!-- The layer-name column is pinned outside the horizontal scroller, so it stays put
+           while the frames scroll. Its rows are kept in step with the grid's by both being
+           driven from the same Rows collection at the same fixed row height. -->
+      <ScrollViewer Grid.Column="0"
+                    Name="LayerNameColumn"
+                    VerticalScrollBarVisibility="Hidden"
+                    HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
+          <!-- A spacer matching the frame-header strip, so row one lines up with column one. -->
+          <Border Height="46" />
+          <ItemsControl ItemsSource="{Binding Rows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TimelineRowViewModel">
+                <Border Height="26" Padding="6,0" Classes.currentRow="{Binding IsCurrentLayer}">
+                  <TextBlock Text="{Binding Name}"
+                             VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis" />
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Column="1"
+                    Name="FrameGrid"
+                    HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+
+          <!-- Frame headers: number, preview and hold time. -->
+          <ItemsControl ItemsSource="{Binding Frames}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TimelineFrameViewModel">
+                <Button Classes="frameHeader"
+                        Classes.currentFrame="{Binding IsCurrent}"
+                        Command="{Binding SelectCommand}">
+                  <ToolTip.Tip>
+                    <StackPanel>
+                      <TextBlock Text="{Binding Number, StringFormat='Frame {0}'}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding DurationMilliseconds, StringFormat='Held for {0} ms'}" />
+                    </StackPanel>
+                  </ToolTip.Tip>
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding Number}" FontSize="10" HorizontalAlignment="Center" />
+                    <Border Width="30" Height="22"
+                            Background="{DynamicResource XpThumbnailCheckerBrush}"
+                            BorderBrush="{DynamicResource XpPanelBorderBrush}"
+                            BorderThickness="1">
+                      <Image Source="{Binding Thumbnail}"
+                             RenderOptions.BitmapInterpolationMode="None"
+                             Stretch="Uniform" />
+                    </Border>
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <!-- One row per layer, one cell per frame. -->
+          <ItemsControl ItemsSource="{Binding Rows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TimelineRowViewModel">
+                <Border Height="26" Classes.currentRow="{Binding IsCurrentLayer}">
+                  <ItemsControl ItemsSource="{Binding Cells}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:TimelineCellViewModel">
+                        <Button Classes="celCell"
+                                Classes.selectedCel="{Binding IsSelected}"
+                                Classes.currentColumn="{Binding IsCurrentFrame}"
+                                Command="{Binding SelectCommand}">
+                          <!-- A filled block means this layer has a drawing on this frame; an
+                               outline means it is empty and shows whatever is beneath. -->
+                          <Border Width="14" Height="14"
+                                  CornerRadius="2"
+                                  IsVisible="{Binding HasContent}"
+                                  Background="{DynamicResource XpForegroundBrush}"
+                                  Opacity="0.75" />
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+        </StackPanel>
+      </ScrollViewer>
+
+    </Grid>
+
+  </DockPanel>
+
+</UserControl>

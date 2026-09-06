@@ -1,13 +1,19 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Media.Immutable;
 using Avalonia.Platform;
+using XPXel.Core.Animation;
 using XPXel.Core.Documents;
+using XPXel.Core.Drawing;
 using XPXel.Core.Editing;
 using XPXel.Core.Primitives;
+using XPXel.Core.Selection;
 using XPXel.Core.Tools;
+using XPXel.UI.Media;
 using XPXel.UI.Rendering;
 
 namespace XPXel.UI.Controls;
@@ -34,9 +40,11 @@ namespace XPXel.UI.Controls;
 /// recomposites a pixel rather than the canvas.
 /// </para>
 /// <para>
-/// <b>Input conventions</b>, chosen to match what artists know from other editors: left and
-/// right buttons draw with the primary and secondary colours, the middle button pans, and
-/// the wheel zooms around the cursor.
+/// <b>Input conventions</b>, chosen to match what artists know from other editors: the left
+/// button draws, the middle button pans, holding space turns any button into a grab handle,
+/// and the wheel zooms around the cursor. The right button is deliberately <i>not</i> a
+/// second drawing button: it opens the active tool's settings, and the secondary colour is
+/// reached by swapping with X.
 /// </para>
 /// </remarks>
 public sealed class PixelCanvasControl : Control, IDisposable
@@ -56,6 +64,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// <summary>Whether to overlay a one-pixel grid when zoomed in far enough.</summary>
     public static readonly StyledProperty<bool> ShowPixelGridProperty =
         AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowPixelGrid), defaultValue: true);
+
+    /// <summary>Whether a dot of the drawing colour follows the pointer.</summary>
+    public static readonly StyledProperty<bool> ShowColorSwatchProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowColorSwatch), defaultValue: true);
 
     /// <summary>The colour painted behind and around the document.</summary>
     public static readonly StyledProperty<IBrush?> CanvasBackgroundProperty =
@@ -79,6 +91,27 @@ public sealed class PixelCanvasControl : Control, IDisposable
     public static readonly StyledProperty<IBrush?> CanvasBorderBrushProperty =
         AvaloniaProperty.Register<PixelCanvasControl, IBrush?>(nameof(CanvasBorderBrush));
 
+    /// <summary>
+    /// How the neighbouring frames are ghosted under the current one, or
+    /// <see langword="null"/> for no onion skinning.
+    /// </summary>
+    public static readonly StyledProperty<OnionSkinSettings?> OnionSkinProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, OnionSkinSettings?>(nameof(OnionSkin));
+
+    /// <summary>The bright half of every overlay outline the canvas draws.</summary>
+    /// <remarks>
+    /// Hover highlights, the brush footprint and the selection edge are all drawn twice — a
+    /// dark line with a bright one beside it. A single-colour outline is invisible against
+    /// artwork of that colour, and a pixel editor's canvas is by definition covered in every
+    /// colour the artist has used. The pair carries its own contrast everywhere.
+    /// </remarks>
+    public static readonly StyledProperty<IBrush?> HighlightBrushProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, IBrush?>(nameof(HighlightBrush));
+
+    /// <summary>The dark half of those outlines.</summary>
+    public static readonly StyledProperty<IBrush?> HighlightShadowBrushProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, IBrush?>(nameof(HighlightShadowBrush));
+
     /// <summary>The current zoom, in screen pixels per image pixel.</summary>
     public static readonly DirectProperty<PixelCanvasControl, double> ZoomProperty =
         AvaloniaProperty.RegisterDirect<PixelCanvasControl, double>(
@@ -92,15 +125,52 @@ public sealed class PixelCanvasControl : Control, IDisposable
         AvaloniaProperty.RegisterDirect<PixelCanvasControl, ImagePoint?>(
             nameof(HoveredPixel), o => o.HoveredPixel);
 
+    /// <summary>
+    /// The canvas's zoom and pan, published so that the rulers beside it can line their
+    /// numbers up with the artwork without duplicating any of the arithmetic.
+    /// </summary>
+    public static readonly DirectProperty<PixelCanvasControl, CanvasViewTransform> ViewTransformProperty =
+        AvaloniaProperty.RegisterDirect<PixelCanvasControl, CanvasViewTransform>(
+            nameof(ViewTransform), o => o.ViewTransform);
+
+    /// <summary>
+    /// The size of the document on display, or an empty size when there is none. Published
+    /// for the same reason as the transform: the rulers need to know where the artwork ends,
+    /// and the document does not raise a property change of its own for a resize.
+    /// </summary>
+    public static readonly DirectProperty<PixelCanvasControl, ImageSize> DocumentSizeProperty =
+        AvaloniaProperty.RegisterDirect<PixelCanvasControl, ImageSize>(
+            nameof(DocumentSize), o => o.DocumentSize);
+
     /// <summary>Beyond this many grid lines the overlay stops being useful and is skipped.</summary>
     private const int MaximumGridLines = 4000;
 
     /// <summary>The checkerboard square size in screen pixels; fixed so it never appears to zoom.</summary>
     private const double CheckerboardSquareSize = 8.0;
 
+    /// <summary>The dash pattern used for the selection and marquee outlines.</summary>
+    /// <remarks>
+    /// Expressed in multiples of the pen width, so the dashes stay the same size on screen
+    /// however far the artist has zoomed in. A selection edge that scaled with the zoom would
+    /// become one long line at 64×, which is exactly where it needs to be readable.
+    /// </remarks>
+    private static readonly ImmutableDashStyle MarchingAnts = new([4, 4], 0);
+
     private DocumentRenderTarget? _renderTarget;
     private PixelDocument? _observedDocument;
+    private DocumentWorkspace? _observedWorkspace;
+    private ToolSettings? _observedSettings;
+    private OnionSkinSettings? _observedOnionSkin;
+    private ToolOverlay? _observedOverlay;
+    private TextEditSession? _observedTextEdit;
+
+    /// <summary>
+    /// How the active tool is presented: which cursor it uses, and whether the canvas should
+    /// outline the brush footprint under the pointer.
+    /// </summary>
+    private ToolPresentation _presentation = ToolPresentations.For(null);
     private CanvasViewTransform _transform = CanvasViewTransform.Identity;
+    private ImageSize _documentSize;
     private ImageBrush? _checkerboardBrush;
     /// <summary>
     /// Whether the artist has zoomed or panned this canvas themselves.
@@ -132,6 +202,49 @@ public sealed class PixelCanvasControl : Control, IDisposable
     private Point _panOrigin;
     private Vector _panStartOffset;
     private ImagePoint? _hoveredPixel;
+
+    /// <summary>
+    /// Where the pointer last was, in view space.
+    /// </summary>
+    /// <remarks>
+    /// The colour swatch is offset from the pointer rather than from the hovered pixel,
+    /// because at 32× a pixel is thirty-two points across and an offset measured in pixels
+    /// would fling the swatch halfway across the canvas.
+    /// </remarks>
+    private Point? _pointerPosition;
+
+    /// <summary>
+    /// The modifiers seen on the last pointer event, for the handover when the tool changes
+    /// under a held button — a key press carries no pointer state of its own.
+    /// </summary>
+    private KeyModifiers _lastKeyModifiers;
+
+    private ImmutableSolidColorBrush? _swatchBrush;
+    private PixelColor _swatchColor;
+
+    private ColorSlots? _observedColors;
+
+    /// <summary>
+    /// Where the pointer went down on a free transform, and how far the artwork had already
+    /// been moved at that moment. Together they turn a drag into an absolute offset, so a drag
+    /// that starts on artwork already moved once carries on from there rather than snapping.
+    /// </summary>
+    private ImagePoint _transformGrabPoint;
+    private ImagePoint _transformGrabOffset;
+    private bool _isDraggingTransform;
+
+    /// <summary>
+    /// The cursor currently carrying the drawing colour, and the colour it carries. Owned by
+    /// this control — one canvas wears one cursor — and replaced when the colour changes.
+    /// </summary>
+    private Cursor? _dotCursor;
+    private PixelColor _dotCursorColor;
+
+    /// <summary>
+    /// Set once the platform has refused to make a bitmap cursor, after which the canvas
+    /// paints the dot itself rather than asking again on every pointer move.
+    /// </summary>
+    private bool _dotCursorUnavailable;
     private double _zoom = 1.0;
 
     /// <summary>
@@ -181,6 +294,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
         set => SetValue(ShowPixelGridProperty, value);
     }
 
+    /// <summary>Whether a dot of the drawing colour follows the pointer.</summary>
+    public bool ShowColorSwatch
+    {
+        get => GetValue(ShowColorSwatchProperty);
+        set => SetValue(ShowColorSwatchProperty, value);
+    }
+
     /// <summary>The colour painted behind and around the document.</summary>
     public IBrush? CanvasBackground
     {
@@ -216,6 +336,39 @@ public sealed class PixelCanvasControl : Control, IDisposable
         set => SetValue(CanvasBorderBrushProperty, value);
     }
 
+    /// <summary>
+    /// How the neighbouring frames are ghosted under the current one, or
+    /// <see langword="null"/> for no onion skinning.
+    /// </summary>
+    public OnionSkinSettings? OnionSkin
+    {
+        get => GetValue(OnionSkinProperty);
+        set => SetValue(OnionSkinProperty, value);
+    }
+
+    /// <summary>The bright half of every overlay outline the canvas draws.</summary>
+    public IBrush? HighlightBrush
+    {
+        get => GetValue(HighlightBrushProperty);
+        set => SetValue(HighlightBrushProperty, value);
+    }
+
+    /// <summary>The dark half of those outlines.</summary>
+    public IBrush? HighlightShadowBrush
+    {
+        get => GetValue(HighlightShadowBrushProperty);
+        set => SetValue(HighlightShadowBrushProperty, value);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether text is currently being typed on this canvas.
+    /// </summary>
+    /// <remarks>
+    /// The shell asks before claiming a bare keystroke for a shortcut. While text is being
+    /// edited, a space is a space and an "x" is an "x" — not "pan" and "swap colours".
+    /// </remarks>
+    public bool IsEditingText => _observedWorkspace?.ActiveTextEdit is not null;
+
     /// <summary>The current zoom, in screen pixels per image pixel.</summary>
     public double Zoom
     {
@@ -238,6 +391,20 @@ public sealed class PixelCanvasControl : Control, IDisposable
     {
         get => _hoveredPixel;
         private set => SetAndRaise(HoveredPixelProperty, ref _hoveredPixel, value);
+    }
+
+    /// <summary>The canvas's current zoom and pan.</summary>
+    public CanvasViewTransform ViewTransform
+    {
+        get => _transform;
+        private set => SetAndRaise(ViewTransformProperty, ref _transform, value);
+    }
+
+    /// <summary>The size of the document on display, or an empty size when there is none.</summary>
+    public ImageSize DocumentSize
+    {
+        get => _documentSize;
+        private set => SetAndRaise(DocumentSizeProperty, ref _documentSize, value);
     }
 
     /// <summary>Zooms in one step, centred on the viewport.</summary>
@@ -283,6 +450,15 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _observedDocument = null;
         }
 
+        ObserveWorkspace(null);
+        ObserveToolContext(null);
+        ObserveOnionSkin(null);
+
+        // The control is going away, so the cursor it was wearing goes with it rather than
+        // waiting on a finaliser to hand the platform resource back.
+        Cursor = ToolCursors.Crosshair;
+        TakeDotCursor()?.Dispose();
+
         _renderTarget?.Dispose();
         _renderTarget = null;
     }
@@ -308,11 +484,23 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         DrawCheckerboard(context, documentRect);
 
-        WriteableBitmap bitmap = _renderTarget.GetBitmap(workspace.Document, workspace.ActiveFrame);
+        WriteableBitmap bitmap = _renderTarget.GetBitmap(
+            workspace.Document,
+            workspace.ActiveFrame,
+            OnionSkin,
+            workspace.ActiveTag);
         context.DrawImage(bitmap, new Rect(bitmap.Size), documentRect);
 
         DrawPixelGrid(context, workspace.Document.Size, documentRect, viewport);
         DrawDocumentBorder(context, documentRect);
+
+        // Overlays go on top of the artwork and of each other in the order an artist reads
+        // them: what is already selected, what is being selected right now, and last of all
+        // where the pointer is about to act.
+        DrawSelection(context, workspace.Selection);
+        DrawMarquee(context);
+        DrawHoverHighlight(context);
+        DrawTextCaret(context);
     }
 
     /// <inheritdoc />
@@ -361,12 +549,32 @@ public sealed class PixelCanvasControl : Control, IDisposable
         }
         else if (change.Property == ToolContextProperty)
         {
+            ToolContext? context = change.GetNewValue<ToolContext?>();
+            ObserveToolContext(context);
+
             // Workspace and ToolContext arrive as two separate bindings in an unspecified
             // order, so whichever lands second has to wire up the colour picker's sampler.
-            if (change.GetNewValue<ToolContext?>() is { } context)
+            if (context is not null)
             {
                 context.CompositeSampler = _renderTarget is null ? null : _renderTarget.SampleComposite;
             }
+        }
+        else if (change.Property == ActiveToolProperty)
+        {
+            OnActiveToolChanged(change.GetOldValue<ITool?>(), change.GetNewValue<ITool?>());
+        }
+        else if (change.Property == HighlightBrushProperty || change.Property == HighlightShadowBrushProperty)
+        {
+            InvalidateVisual();
+        }
+        else if (change.Property == ShowColorSwatchProperty)
+        {
+            UpdateCursor();
+            InvalidateVisual();
+        }
+        else if (change.Property == OnionSkinProperty)
+        {
+            ObserveOnionSkin(change.GetNewValue<OnionSkinSettings?>());
         }
         else if (change.Property == CheckerboardLightProperty || change.Property == CheckerboardDarkProperty)
         {
@@ -400,8 +608,9 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             // Arming mid-stroke would leave a half-drawn line behind, so the request is
             // ignored until the button is released. Key auto-repeat calls this every few
-            // milliseconds, which is why it has to be idempotent.
-            if (_isSpacePanArmed || _activeButton != ToolPointerButton.None)
+            // milliseconds, which is why it has to be idempotent. Typing takes precedence
+            // over the shortcut outright: while text is being edited a space is a space.
+            if (_isSpacePanArmed || _activeButton != ToolPointerButton.None || IsEditingText)
             {
                 return;
             }
@@ -417,12 +626,189 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// <inheritdoc />
     protected override void OnKeyDown(KeyEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
         base.OnKeyDown(e);
+
+        // Typing wins over every bare shortcut. Marking the key handled is what stops it
+        // reaching the shell's key bindings, where "x" swaps the drawing colours — which is
+        // not what an artist typing the word "next" is asking for.
+        if (_observedWorkspace?.ActiveTextEdit is { } editing && HandleTextEditKey(editing, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (_observedWorkspace?.ActiveTransform is not null && HandleTransformKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
 
         if (e.Key == Key.Space)
         {
             SetSpacePanArmed(true);
             e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Applies a keystroke to the pixels being moved.
+    /// </summary>
+    /// <returns><see langword="true"/> if the key belonged to the move.</returns>
+    /// <remarks>
+    /// The arrow keys are here because a move is often a nudge of one or two pixels, and at that
+    /// size a mouse is the wrong instrument entirely. A key held with Control never belongs to
+    /// the move, so Ctrl+Z still undoes and Ctrl+T still puts the artwork down.
+    /// </remarks>
+    private bool HandleTransformKey(KeyEventArgs e)
+    {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
+        {
+            return false;
+        }
+
+        if (_observedWorkspace is not { ActiveTransform: { } transform } workspace)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                workspace.CancelTransform();
+                return true;
+
+            case Key.Enter:
+                workspace.CommitTransform();
+                return true;
+
+            case Key.Left:
+                transform.MoveBy(-1, 0);
+                return true;
+
+            case Key.Right:
+                transform.MoveBy(1, 0);
+                return true;
+
+            case Key.Up:
+                transform.MoveBy(0, -1);
+                return true;
+
+            case Key.Down:
+                transform.MoveBy(0, 1);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Moves the lifted artwork to follow the pointer.</summary>
+    private void DragTransform(Point position)
+    {
+        if (_observedWorkspace?.ActiveTransform is not { } transform)
+        {
+            _isDraggingTransform = false;
+            return;
+        }
+
+        ImagePoint now = _transform.ToImagePoint(position);
+
+        transform.MoveTo(new ImagePoint(
+            _transformGrabOffset.X + (now.X - _transformGrabPoint.X),
+            _transformGrabOffset.Y + (now.Y - _transformGrabPoint.Y)));
+    }
+
+    /// <inheritdoc />
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        base.OnTextInput(e);
+
+        if (_observedWorkspace?.ActiveTextEdit is not { } editing || string.IsNullOrEmpty(e.Text))
+        {
+            return;
+        }
+
+        // Control characters arrive here on some platforms as well as through OnKeyDown, and
+        // inserting them literally would put an invisible glyph into the artist's text.
+        if (e.Text.Length == 1 && char.IsControl(e.Text[0]))
+        {
+            return;
+        }
+
+        editing.InsertText(e.Text);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Applies a keystroke to the text being typed.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> if the key belonged to the text editor. A key held with Control
+    /// never does, so Ctrl+S still saves and Ctrl+Z still undoes while text is being edited.
+    /// </returns>
+    private bool HandleTextEditKey(TextEditSession editing, KeyEventArgs e)
+    {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                _observedWorkspace?.CancelTextEdit();
+                return true;
+
+            case Key.Enter:
+                editing.InsertText("\n");
+                return true;
+
+            case Key.Back:
+                editing.DeleteBackward();
+                return true;
+
+            case Key.Delete:
+                editing.DeleteForward();
+                return true;
+
+            case Key.Left:
+                editing.MoveCaret(CaretMovement.Left);
+                return true;
+
+            case Key.Right:
+                editing.MoveCaret(CaretMovement.Right);
+                return true;
+
+            case Key.Up:
+                editing.MoveCaret(CaretMovement.Up);
+                return true;
+
+            case Key.Down:
+                editing.MoveCaret(CaretMovement.Down);
+                return true;
+
+            case Key.Home:
+                editing.MoveCaret(CaretMovement.LineStart);
+                return true;
+
+            case Key.End:
+                editing.MoveCaret(CaretMovement.LineEnd);
+                return true;
+
+            case Key.Tab:
+                editing.InsertText("    ");
+                return true;
+
+            default:
+                // Every other key is deliberately left unhandled, and that is load-bearing:
+                // on Windows a key marked handled never produces the character message that
+                // becomes OnTextInput, so swallowing letters here to keep them away from the
+                // tool shortcuts would mean the artist could not type a letter at all. The
+                // shell asks the canvas whether text is being edited before claiming any bare
+                // key — see MainView — which is where that conflict is actually resolved.
+                return false;
         }
     }
 
@@ -464,16 +850,79 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
     /// <summary>
     /// Reflects the current mode in the pointer: an open hand while pan mode is armed, a
-    /// closed one while actually dragging, and the inherited cursor otherwise.
+    /// closed one while actually dragging, and the tool's own cursor otherwise.
     /// </summary>
     private void UpdateCursor()
     {
-        Cursor = (_isSpacePanArmed, _isPanning) switch
+        // Pan mode overrides the tool's own cursor, because while space is held the canvas is
+        // a grab handle and nothing else.
+        if (_isSpacePanArmed)
         {
-            (true, true) => new Cursor(StandardCursorType.SizeAll),
-            (true, false) => new Cursor(StandardCursorType.Hand),
-            _ => Cursor.Default,
-        };
+            Cursor = new Cursor(_isPanning ? StandardCursorType.SizeAll : StandardCursorType.Hand);
+            return;
+        }
+
+        Cursor? retired = RefreshColorDotCursor();
+
+        Cursor = _dotCursor ?? ToolCursors.For(_presentation);
+
+        // Only now that the control has been given the replacement is the cursor it was
+        // wearing certainly unused, and safe to hand its platform resource back.
+        retired?.Dispose();
+    }
+
+    /// <summary>
+    /// Brings the cursor's colour dot up to date, and returns the cursor it replaced.
+    /// </summary>
+    /// <returns>
+    /// The cursor that is no longer wanted, for the caller to dispose <em>after</em> putting
+    /// its replacement on the control, or <see langword="null"/> if nothing was replaced.
+    /// </returns>
+    /// <remarks>
+    /// Only the tools that draw with the primary colour get one, and only those wearing a
+    /// crosshair: the bucket and the text tool have cursors of their own that say something
+    /// more useful, and fall back to the painted dot.
+    /// </remarks>
+    private Cursor? RefreshColorDotCursor()
+    {
+        bool wanted = ShowColorSwatch
+            && _presentation.ShowsColorSwatch
+            && _presentation.Cursor == ToolCursorKind.Crosshair
+            && !_dotCursorUnavailable
+            && ToolContext is not null;
+
+        if (!wanted)
+        {
+            return TakeDotCursor();
+        }
+
+        PixelColor color = ToolContext!.Colors.Primary;
+
+        if (_dotCursor is not null && _dotCursorColor == color)
+        {
+            return null;
+        }
+
+        if (ToolCursors.CreateColorDotCrosshair(color) is not { } built)
+        {
+            _dotCursorUnavailable = true;
+            return TakeDotCursor();
+        }
+
+        Cursor? retired = _dotCursor;
+
+        _dotCursor = built;
+        _dotCursorColor = color;
+
+        return retired;
+    }
+
+    /// <summary>Gives up the coloured cursor, handing it to the caller to dispose.</summary>
+    private Cursor? TakeDotCursor()
+    {
+        Cursor? stale = _dotCursor;
+        _dotCursor = null;
+        return stale;
     }
 
     // ---------------------------------------------------------------------------------
@@ -502,6 +951,29 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        // A right press belongs to the tool's settings panel, not to the tool. It is left
+        // entirely alone here — unhandled and uncaptured — so that the ContextFlyout the
+        // document view attaches opens on the release, the way every context menu on the
+        // platform does. This is why the secondary colour is reached with X rather than by
+        // drawing with the right button.
+        if (properties.IsRightButtonPressed)
+        {
+            return;
+        }
+
+        // A free transform owns the canvas while it lasts: the pixels are off the layer and
+        // in the artist's hand, and a tool given a press now would draw into the hole.
+        if (_observedWorkspace?.ActiveTransform is { } transform)
+        {
+            _isDraggingTransform = true;
+            _transformGrabPoint = _transform.ToImagePoint(position);
+            _transformGrabOffset = transform.Offset;
+            _pointerPosition = position;
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
+
         if (ToolContext is not { } context || ActiveTool is not { } tool)
         {
             return;
@@ -514,6 +986,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
         }
 
         e.Pointer.Capture(this);
+        _pointerPosition = position;
+        _lastKeyModifiers = e.KeyModifiers;
         tool.OnPointerPressed(context, CreateToolArgs(position, _activeButton, e.KeyModifiers));
         e.Handled = true;
     }
@@ -534,11 +1008,19 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        if (_isDraggingTransform)
+        {
+            DragTransform(position);
+            e.Handled = true;
+            return;
+        }
+
         if (ToolContext is not { } context || ActiveTool is not { } tool)
         {
             return;
         }
 
+        _lastKeyModifiers = e.KeyModifiers;
         tool.OnPointerMoved(context, CreateToolArgs(position, _activeButton, e.KeyModifiers));
     }
 
@@ -551,6 +1033,16 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             _isPanning = false;
             UpdateCursor();
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            return;
+        }
+
+        // The drag ends, the transform does not: the artist is free to pick the artwork up
+        // again, nudge it with the arrow keys, or press Enter to put it down.
+        if (_isDraggingTransform)
+        {
+            _isDraggingTransform = false;
             e.Pointer.Capture(null);
             e.Handled = true;
             return;
@@ -580,6 +1072,11 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         _activeButton = ToolPointerButton.None;
         _isPanning = false;
+
+        // The drag stops, but the transform itself survives: the pixels are still in the air
+        // and the artist has not said where to put them.
+        _isDraggingTransform = false;
+
         UpdateCursor();
     }
 
@@ -587,7 +1084,12 @@ public sealed class PixelCanvasControl : Control, IDisposable
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
-        HoveredPixel = null;
+
+        if (_hoveredPixel is not null)
+        {
+            HoveredPixel = null;
+            InvalidateVisual();
+        }
     }
 
     /// <inheritdoc />
@@ -615,6 +1117,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _observedDocument.Changed -= OnDocumentChanged;
         }
 
+        ObserveWorkspace(workspace);
+
         _renderTarget?.Dispose();
         _renderTarget = null;
         _observedDocument = workspace?.Document;
@@ -625,6 +1129,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _observedDocument.Changed += OnDocumentChanged;
             _renderTarget = new DocumentRenderTarget(_observedDocument.Size);
         }
+
+        DocumentSize = _observedDocument?.Size ?? default;
 
         // The colour picker samples what is on screen, and the render target is the only
         // thing that holds it.
@@ -652,6 +1158,11 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             // Anything structural can change what every pixel looks like.
             _renderTarget.InvalidateAll();
+        }
+
+        if (e.Kind == DocumentChangeKind.Size && _observedDocument is { } document)
+        {
+            DocumentSize = document.Size;
         }
 
         InvalidateVisual();
@@ -773,6 +1284,486 @@ public sealed class PixelCanvasControl : Control, IDisposable
     }
 
     // ---------------------------------------------------------------------------------
+    // Overlays
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Outlines the pixel under the pointer, and the footprint the brush would cover.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the brush cursor.</b> Drawing the footprint here rather than baking it into
+    /// a mouse cursor is what lets it be exact: it is expressed in document pixels and scaled
+    /// by the same transform as the artwork, so at 32× it is a large accurate ring and at 1×
+    /// it is a few pixels, with no bitmap to regenerate when either the brush size or the zoom
+    /// changes.
+    /// </para>
+    /// <para>
+    /// The single hovered pixel is always outlined as well, even under a large brush. The
+    /// footprint says what the brush will cover; the pixel says where the pointer actually is,
+    /// and on a 32×32 sprite those are two different questions.
+    /// </para>
+    /// </remarks>
+    private void DrawHoverHighlight(DrawingContext context)
+    {
+        if (_hoveredPixel is not { } pixel || _isSpacePanArmed || _isPanning)
+        {
+            return;
+        }
+
+        if (HighlightBrush is not { } bright || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        if (_presentation.ShowsBrushOutline && _observedSettings is { BrushSize: > 1 } settings)
+        {
+            Rect footprint = _transform.GetPixelRect(BrushStamp.GetBounds(pixel, settings.BrushSize));
+
+            if (settings.BrushShape == BrushShape.Circle)
+            {
+                // Tracing the rasterised disc exactly would give a jagged ring nobody can read
+                // at low zoom. The inscribed ellipse says the same thing — this is the area the
+                // brush covers — and stays legible at every magnification.
+                DrawOutlinedEllipse(context, footprint, dark, bright);
+            }
+            else
+            {
+                DrawOutlinedRect(context, footprint, dark, bright);
+            }
+        }
+
+        DrawOutlinedRect(context, _transform.GetPixelRect(new ImageRect(pixel, new ImageSize(1, 1))), dark, bright);
+
+        DrawColorSwatch(context, dark, bright);
+    }
+
+    /// <summary>
+    /// Draws a round dot of the colour the tool is about to lay down, beside the pointer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the fallback. Where the cursor itself can carry the dot it does, because a
+    /// painted marker can only move when the canvas repaints and so trails the pointer from
+    /// pixel to pixel; see <see cref="ToolCursors.CreateColorDotCrosshair"/>. What is left for
+    /// here is the tools whose cursor says something more useful than a crosshair — the bucket
+    /// and the text tool — and any platform that will not make a bitmap cursor at all.
+    /// </para>
+    /// <para>
+    /// Down and to the right of the pointer by more than the dot is wide, matching where the
+    /// cursor puts it. It is drawn in view space at a fixed size rather than in document
+    /// pixels, so it stays the same small dot at every magnification instead of growing into a
+    /// disc at 32×, and the same dark-and-bright outline as every other overlay carries it over
+    /// artwork of its own colour — which is otherwise exactly when it would disappear.
+    /// </para>
+    /// </remarks>
+    private void DrawColorSwatch(DrawingContext context, IBrush dark, IBrush bright)
+    {
+        if (!ShowColorSwatch
+            || !_presentation.ShowsColorSwatch
+            || _dotCursor is not null
+            || _pointerPosition is not { } position
+            || ToolContext is not { } tools)
+        {
+            return;
+        }
+
+        const double radius = 4.5;
+        const double offset = 8.5;
+
+        // The brush is cached rather than built per frame: this runs on every pointer move,
+        // and the colour changes when a person clicks a swatch, not sixty times a second.
+        PixelColor color = tools.Colors.Primary;
+        if (_swatchBrush is null || _swatchColor != color)
+        {
+            _swatchColor = color;
+            _swatchBrush = new ImmutableSolidColorBrush(color.ToAvalonia());
+        }
+
+        Point middle = new(position.X + offset + radius, position.Y + offset + radius);
+
+        context.DrawEllipse(_swatchBrush, null, middle, radius, radius);
+        context.DrawEllipse(null, new Pen(dark, 2.0), middle, radius, radius);
+        context.DrawEllipse(null, new Pen(bright, 1.0), middle, radius, radius);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the colour dot is being painted rather than worn, and
+    /// so has to be repainted as the pointer moves rather than only as it changes pixel.
+    /// </summary>
+    private bool IsPaintingColorDot =>
+        ShowColorSwatch && _presentation.ShowsColorSwatch && _dotCursor is null;
+
+    /// <summary>Outlines the current selection, if there is one.</summary>
+    /// <remarks>
+    /// Only the selection's bounding rectangle is drawn, which is exact for the rectangular
+    /// marquee — the only tool that can create a selection today. A lasso or magic wand would
+    /// need the mask's own edge traced instead, and this is the one place that would change.
+    /// </remarks>
+    private void DrawSelection(DrawingContext context, SelectionMask? selection)
+    {
+        if (selection is null
+            || selection.IsEmpty
+            || HighlightBrush is not { } bright
+            || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        // While the artwork is in the air the marquee goes with it, because the marquee is
+        // what the artist is aiming; the selection itself does not move until it is put down.
+        ImageRect bounds = _observedWorkspace?.ActiveTransform is { } transform
+            ? transform.Bounds
+            : selection.Bounds;
+
+        DrawMarchingAnts(context, _transform.GetPixelRect(bounds), dark, bright);
+    }
+
+    /// <summary>Outlines the rectangle a selection tool is currently dragging out.</summary>
+    private void DrawMarquee(DrawingContext context)
+    {
+        if (_observedOverlay?.Marquee is not { } marquee
+            || marquee.IsEmpty
+            || HighlightBrush is not { } bright
+            || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        DrawMarchingAnts(context, _transform.GetPixelRect(marquee), dark, bright);
+    }
+
+    /// <summary>Draws the text caret while text is being typed.</summary>
+    /// <remarks>
+    /// The caret does not blink. Blinking needs a timer invalidating the canvas several times
+    /// a second for as long as the artist is typing, which on a large document is a real cost
+    /// for a decorative effect — and a solid caret over artwork is, if anything, easier to
+    /// find than one that keeps disappearing.
+    /// </remarks>
+    private void DrawTextCaret(DrawingContext context)
+    {
+        if (_observedTextEdit is not { } editing
+            || HighlightBrush is not { } bright
+            || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        Rect caret = _transform.GetPixelRect(editing.CaretBounds);
+
+        // The caret is one image pixel wide, which at 100% zoom is a single screen pixel and
+        // effectively invisible. A floor keeps it findable without making it inaccurate at
+        // high zoom, where the true width is already wider than the floor.
+        Rect visible = caret.Width < 2 ? caret.WithWidth(2) : caret;
+
+        context.FillRectangle(dark, visible.Inflate(1));
+        context.FillRectangle(bright, visible);
+    }
+
+    private static void DrawOutlinedRect(DrawingContext context, Rect rect, IBrush shadow, IBrush highlight)
+    {
+        // Half-pixel offsets put each one-pixel stroke on the device grid rather than
+        // straddling two rows, which would render it as a soft two-pixel line.
+        context.DrawRectangle(new Pen(shadow, 1.0), rect.Inflate(0.5));
+        context.DrawRectangle(new Pen(highlight, 1.0), rect.Deflate(0.5));
+    }
+
+    private static void DrawOutlinedEllipse(DrawingContext context, Rect rect, IBrush shadow, IBrush highlight)
+    {
+        DrawEllipse(context, rect.Inflate(0.5), shadow);
+        DrawEllipse(context, rect.Deflate(0.5), highlight);
+    }
+
+    private static void DrawEllipse(DrawingContext context, Rect rect, IBrush brush)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0)
+        {
+            return;
+        }
+
+        context.DrawEllipse(null, new Pen(brush, 1.0), rect.Center, rect.Width / 2, rect.Height / 2);
+    }
+
+    private static void DrawMarchingAnts(DrawingContext context, Rect rect, IBrush shadow, IBrush highlight)
+    {
+        // A solid dark line with a dashed bright one over it: the gaps in the bright dashes
+        // show the dark line beneath, so the edge stays visible whatever it crosses.
+        context.DrawRectangle(new Pen(shadow, 1.0), rect.Inflate(0.5));
+        context.DrawRectangle(new Pen(highlight, 1.0) { DashStyle = MarchingAnts }, rect.Inflate(0.5));
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Observation
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Follows the workspace's selection and its text editing state, so that either one
+    /// changing repaints the canvas.
+    /// </summary>
+    private void ObserveWorkspace(DocumentWorkspace? workspace)
+    {
+        if (ReferenceEquals(_observedWorkspace, workspace))
+        {
+            return;
+        }
+
+        // A document swapped away while its text is half-typed, or while its pixels are in
+        // mid-air, must keep the work rather than discard it. Committing here is what makes
+        // clicking another tab safe.
+        _observedWorkspace?.CommitTextEdit();
+        _observedWorkspace?.CommitTransform();
+
+        if (_observedWorkspace is not null)
+        {
+            _observedWorkspace.PropertyChanged -= OnWorkspacePropertyChanged;
+        }
+
+        _observedWorkspace = workspace;
+
+        if (_observedWorkspace is not null)
+        {
+            _observedWorkspace.PropertyChanged += OnWorkspacePropertyChanged;
+        }
+
+        ObserveTextEdit(_observedWorkspace?.ActiveTextEdit);
+    }
+
+    private void ObserveToolContext(ToolContext? toolContext)
+    {
+        ColorSlots? colors = toolContext?.Colors;
+
+        if (!ReferenceEquals(_observedColors, colors))
+        {
+            if (_observedColors is not null)
+            {
+                _observedColors.PropertyChanged -= OnColorSlotsChanged;
+            }
+
+            _observedColors = colors;
+
+            if (_observedColors is not null)
+            {
+                _observedColors.PropertyChanged += OnColorSlotsChanged;
+            }
+        }
+
+        ToolSettings? settings = toolContext?.Settings;
+
+        if (!ReferenceEquals(_observedSettings, settings))
+        {
+            if (_observedSettings is not null)
+            {
+                _observedSettings.PropertyChanged -= OnToolSettingsChanged;
+            }
+
+            _observedSettings = settings;
+
+            if (_observedSettings is not null)
+            {
+                _observedSettings.PropertyChanged += OnToolSettingsChanged;
+            }
+        }
+
+        ToolOverlay? overlay = toolContext?.Overlay;
+
+        if (ReferenceEquals(_observedOverlay, overlay))
+        {
+            return;
+        }
+
+        if (_observedOverlay is not null)
+        {
+            _observedOverlay.PropertyChanged -= OnOverlayChanged;
+        }
+
+        _observedOverlay = overlay;
+
+        if (_observedOverlay is not null)
+        {
+            _observedOverlay.PropertyChanged += OnOverlayChanged;
+        }
+    }
+
+    /// <summary>
+    /// Follows the onion skin settings, so that turning ghosts on or changing their strength
+    /// repaints without anything else having to notice.
+    /// </summary>
+    private void ObserveOnionSkin(OnionSkinSettings? settings)
+    {
+        if (ReferenceEquals(_observedOnionSkin, settings))
+        {
+            return;
+        }
+
+        if (_observedOnionSkin is not null)
+        {
+            _observedOnionSkin.PropertyChanged -= OnOnionSkinChanged;
+        }
+
+        _observedOnionSkin = settings;
+
+        if (_observedOnionSkin is not null)
+        {
+            _observedOnionSkin.PropertyChanged += OnOnionSkinChanged;
+        }
+
+        OnOnionSkinChanged(this, new PropertyChangedEventArgs(null));
+    }
+
+    private void OnOnionSkinChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // Every one of these settings changes what the whole canvas looks like, so there is
+        // no useful dirty rectangle to compute.
+        _renderTarget?.InvalidateAll();
+        InvalidateVisual();
+    }
+
+    private void ObserveTextEdit(TextEditSession? session)
+    {
+        if (ReferenceEquals(_observedTextEdit, session))
+        {
+            return;
+        }
+
+        if (_observedTextEdit is not null)
+        {
+            _observedTextEdit.Changed -= OnTextEditChanged;
+        }
+
+        _observedTextEdit = session;
+
+        if (_observedTextEdit is not null)
+        {
+            _observedTextEdit.Changed += OnTextEditChanged;
+
+            // Keystrokes only reach a focused control, and the click that started the edit may
+            // have gone to a panel rather than to the canvas.
+            Focus();
+        }
+
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Switches the cursor and finishes any typing when the artist picks a different tool.
+    /// </summary>
+    /// <remarks>
+    /// Ending the text edit and handing over a stroke here rather than in the tools is
+    /// deliberate: a tool is never told that it has been deselected. The canvas is the thing
+    /// that knows.
+    /// </remarks>
+    private void OnActiveToolChanged(ITool? previous, ITool? tool)
+    {
+        _observedWorkspace?.CommitTextEdit();
+
+        // Picking up a different tool is as clear a way of saying "I have finished moving
+        // this" as pressing Enter, and leaving the artwork in mid-air while a pencil draws
+        // underneath it would be indefensible.
+        _observedWorkspace?.CommitTransform();
+
+        HandOverActiveStroke(previous, tool);
+
+        _presentation = ToolPresentations.For(tool?.Id);
+        UpdateCursor();
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Ends the outgoing tool's stroke and starts the incoming tool's, when the artist
+    /// switches tools with the button still held.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Pressing E halfway through a pencil stroke should carry on erasing from where the
+    /// pencil had got to, and that is worth having on its own. But the handover is not only a
+    /// convenience: without it the outgoing tool is simply abandoned mid-stroke. Pointer
+    /// events are routed to whichever tool is active <em>now</em>, so the pencil would never
+    /// see its release, and its open raster edit session — which is holding every pixel's
+    /// pre-stroke value for the undo stack — would sit there until the tool's next press
+    /// rolled the whole thing back. That is what used to resurrect erased artwork after a bout
+    /// of switching between the pencil and the eraser.
+    /// </para>
+    /// <para>
+    /// Both tools are given the same position and button, so nothing is drawn at a place the
+    /// pointer never was; the incoming tool simply begins where the outgoing one stopped.
+    /// </para>
+    /// </remarks>
+    private void HandOverActiveStroke(ITool? outgoing, ITool? incoming)
+    {
+        if (outgoing is null || _activeButton == ToolPointerButton.None || ToolContext is not { } context)
+        {
+            return;
+        }
+
+        // Belt and braces: the press records a position, so this cannot normally happen. If it
+        // ever did, dropping the stroke would still be far better than leaking its session.
+        if (_pointerPosition is not { } position)
+        {
+            outgoing.Cancel(context);
+            return;
+        }
+
+        ToolPointerEventArgs args = CreateToolArgs(position, _activeButton, _lastKeyModifiers);
+
+        outgoing.OnPointerReleased(context, args);
+        incoming?.OnPointerPressed(context, args);
+    }
+
+    /// <summary>
+    /// Rebuilds the cursor when the drawing colour changes, since the cursor is carrying it.
+    /// </summary>
+    private void OnColorSlotsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e?.PropertyName is not (null or nameof(ColorSlots.Primary)))
+        {
+            return;
+        }
+
+        UpdateCursor();
+        InvalidateVisual();
+    }
+
+    private void OnWorkspacePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        switch (e.PropertyName)
+        {
+            case nameof(DocumentWorkspace.Selection):
+            case nameof(DocumentWorkspace.ActiveTransform):
+                InvalidateVisual();
+                break;
+
+            case nameof(DocumentWorkspace.ActiveTextEdit):
+                ObserveTextEdit(_observedWorkspace?.ActiveTextEdit);
+                break;
+
+            // Moving along the timeline changes every pixel on screen, and onion skinning
+            // means the neighbouring frames change with it.
+            case nameof(DocumentWorkspace.ActiveFrame):
+            case nameof(DocumentWorkspace.ActiveTag):
+                _renderTarget?.InvalidateAll();
+                InvalidateVisual();
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    private void OnToolSettingsChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // The hover footprint is drawn from the brush size and shape, so changing either has
+        // to repaint even though no pixel of the artwork moved.
+        if (e.PropertyName is nameof(ToolSettings.BrushSize) or nameof(ToolSettings.BrushShape))
+        {
+            InvalidateVisual();
+        }
+    }
+
+    private void OnOverlayChanged(object? sender, PropertyChangedEventArgs e) => InvalidateVisual();
+
+    private void OnTextEditChanged(object? sender, EventArgs e) => InvalidateVisual();
+
+    // ---------------------------------------------------------------------------------
     // View manipulation
     // ---------------------------------------------------------------------------------
 
@@ -796,21 +1787,36 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
     private void ApplyTransform(CanvasViewTransform transform)
     {
-        _transform = transform;
+        ViewTransform = transform;
         SetAndRaise(ZoomProperty, ref _zoom, transform.Scale);
         InvalidateVisual();
     }
 
     private void UpdateHoveredPixel(Point position)
     {
+        _pointerPosition = position;
+
+        ImagePoint? previous = _hoveredPixel;
+
         if (Workspace is not { } workspace)
         {
             HoveredPixel = null;
-            return;
+        }
+        else
+        {
+            ImagePoint point = _transform.ToImagePoint(position);
+            HoveredPixel = workspace.Document.Bounds.Contains(point) ? point : null;
         }
 
-        ImagePoint point = _transform.ToImagePoint(position);
-        HoveredPixel = workspace.Document.Bounds.Contains(point) ? point : null;
+        // The highlight follows the pointer, so it has to be repainted when the pointer moves
+        // to a different pixel — and only then, or a canvas would repaint at the pointer's
+        // full sample rate while drawing changes nothing. The painted colour dot is the
+        // exception: it follows the pointer rather than the pixel grid, and repainting it only
+        // on a change of pixel is what makes it look as though it is dragged along behind.
+        if (previous != _hoveredPixel || IsPaintingColorDot)
+        {
+            InvalidateVisual();
+        }
     }
 
     private ToolPointerEventArgs CreateToolArgs(Point position, ToolPointerButton button, KeyModifiers modifiers) =>

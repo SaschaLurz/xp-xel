@@ -56,6 +56,9 @@ internal static class Program
         return app;
     }
 
-    private static void RegisterDesktopServices(IServiceCollection services) =>
+    private static void RegisterDesktopServices(IServiceCollection services)
+    {
         services.AddSingleton<ISettingsStore, FileSettingsStore>();
+        services.AddSingleton<IAutosaveStore, FileAutosaveStore>();
+    }
 }

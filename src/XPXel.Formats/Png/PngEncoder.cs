@@ -55,6 +55,26 @@ internal static class PngEncoder
 
     private static void WriteImageData(Stream stream, PixelBuffer image)
     {
+        // A single IDAT chunk is legal and simplest. Splitting into several only matters for
+        // streaming decoders working with limited memory.
+        PngChunkIO.WriteChunk(stream, "IDAT", Compress(image));
+    }
+
+    /// <summary>
+    /// Filters and deflates an image into the byte stream a PNG data chunk carries.
+    /// </summary>
+    /// <param name="image">The image to compress.</param>
+    /// <returns>The compressed data, ready to place in an IDAT or fdAT chunk.</returns>
+    /// <remarks>
+    /// Split out from <see cref="WriteImageData"/> so the animated encoder can reuse it: an
+    /// APNG frame is exactly this byte stream in an fdAT chunk instead of an IDAT one. Sharing
+    /// it means a still PNG and one frame of an animation are compressed identically rather
+    /// than by two implementations that could drift.
+    /// </remarks>
+    public static byte[] Compress(PixelBuffer image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+
         byte[] filtered = BuildFilteredScanlines(image);
 
         using MemoryStream compressed = new();
@@ -63,10 +83,13 @@ internal static class PngEncoder
             zlib.Write(filtered);
         }
 
-        // A single IDAT chunk is legal and simplest. Splitting into several only matters for
-        // streaming decoders working with limited memory.
-        PngChunkIO.WriteChunk(stream, "IDAT", compressed.GetBuffer().AsSpan(0, (int)compressed.Length));
+        return compressed.ToArray();
     }
+
+    /// <summary>Writes the IHDR chunk describing an image.</summary>
+    /// <param name="stream">The stream to write to.</param>
+    /// <param name="image">The image the header describes.</param>
+    public static void WriteImageHeader(Stream stream, PixelBuffer image) => WriteHeader(stream, image);
 
     /// <summary>
     /// Applies PNG's per-scanline filters, choosing the best filter for each row.

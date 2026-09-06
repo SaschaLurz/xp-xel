@@ -58,6 +58,17 @@ internal sealed class ProjectManifest
     /// <summary>Every cel, each naming the archive entry holding its pixels.</summary>
     public List<CelManifest> Cels { get; set; } = [];
 
+    /// <summary>
+    /// The named animations cut out of the timeline, or an empty list for a still image.
+    /// </summary>
+    /// <remarks>
+    /// Added after schema version 1 shipped, and needing no migration for the same reason the
+    /// layer label colour did not: it is optional with a sensible default. A file written by
+    /// an older build simply has no animations, and one written by a newer build still opens
+    /// in an older one, which ignores the property and shows every frame as a flat timeline.
+    /// </remarks>
+    public List<TagManifest> Tags { get; set; } = [];
+
     /// <summary>The document palette.</summary>
     public PaletteManifest Palette { get; set; } = new();
 
@@ -82,7 +93,7 @@ internal sealed class LayerManifest
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
-    /// The kind of layer: <c>"raster"</c> or <c>"group"</c>. Stored as text so that new
+    /// The kind of layer: <c>"raster"</c>, <c>"group"</c> or <c>"text"</c>. Stored as text so that new
     /// layer kinds can be added without renumbering, and an unknown kind can be reported
     /// clearly instead of being misread as an existing one.
     /// </summary>
@@ -117,6 +128,93 @@ internal sealed class LayerManifest
 
     /// <summary>Nested layers, bottom-most first. Empty for a raster layer.</summary>
     public List<LayerManifest> Children { get; set; } = [];
+
+    /// <summary>
+    /// The words and typography of a text layer, or <see langword="null"/> for every other
+    /// kind of layer.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes text re-editable across a save and reload. The rendered glyphs are
+    /// stored separately as an ordinary cel, so a reader that ignores this property still
+    /// shows the text correctly — it just cannot change the words.
+    /// </remarks>
+    public TextManifest? Text { get; set; }
+}
+
+/// <summary>The editable content of a text layer.</summary>
+internal sealed class TextManifest
+{
+    /// <summary>The text itself, which may contain line breaks.</summary>
+    public string Content { get; set; } = string.Empty;
+
+    /// <summary>The horizontal position of the text block's top-left corner.</summary>
+    public int OriginX { get; set; }
+
+    /// <summary>The vertical position of the text block's top-left corner.</summary>
+    public int OriginY { get; set; }
+
+    /// <summary>
+    /// The font family name. A name this machine does not have is substituted by the font
+    /// engine rather than rejected, which is why the glyphs are also stored as pixels.
+    /// </summary>
+    public string FontFamily { get; set; } = string.Empty;
+
+    /// <summary>The font size in pixels.</summary>
+    public double FontSize { get; set; } = 16.0;
+
+    /// <summary>Whether the text is bold.</summary>
+    public bool IsBold { get; set; }
+
+    /// <summary>Whether the text is italic.</summary>
+    public bool IsItalic { get; set; }
+
+    /// <summary>Whether the text is underlined.</summary>
+    public bool IsUnderline { get; set; }
+
+    /// <summary>Whether the text is struck through.</summary>
+    public bool IsStrikethrough { get; set; }
+
+    /// <summary>The alignment name; an unrecognised value loads as Left.</summary>
+    public string Alignment { get; set; } = nameof(Core.Text.TextAlignment.Left);
+
+    /// <summary>The line height multiplier, where 1.0 is single spacing.</summary>
+    public double LineSpacing { get; set; } = 1.0;
+
+    /// <summary>Extra space between characters, in pixels.</summary>
+    public double LetterSpacing { get; set; }
+
+    /// <summary>Whether glyph edges are smoothed.</summary>
+    public bool IsAntiAliased { get; set; }
+
+    /// <summary>The glyph colour as <c>#RRGGBB</c> or <c>#RRGGBBAA</c>.</summary>
+    public string Color { get; set; } = "#000000";
+}
+
+/// <summary>One named animation over a range of frames.</summary>
+internal sealed class TagManifest
+{
+    /// <summary>The tag's stable identity.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>The animation's name, which becomes a file name on export.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>The first frame index, inclusive.</summary>
+    public int From { get; set; }
+
+    /// <summary>The last frame index, inclusive.</summary>
+    public int To { get; set; }
+
+    /// <summary>
+    /// The loop direction name; an unrecognised value loads as Forward.
+    /// </summary>
+    public string Direction { get; set; } = nameof(Core.Documents.LoopDirection.Forward);
+
+    /// <summary>How many times the animation plays, or 0 for an endless loop.</summary>
+    public int RepeatCount { get; set; }
+
+    /// <summary>The tag's bar colour as <c>#RRGGBBAA</c>, or <see langword="null"/> for none.</summary>
+    public string? Color { get; set; }
 }
 
 /// <summary>The pixel content of one layer on one frame.</summary>

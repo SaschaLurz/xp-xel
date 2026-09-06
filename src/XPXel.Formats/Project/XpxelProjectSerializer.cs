@@ -8,6 +8,7 @@ using XPXel.Core.Documents;
 using XPXel.Core.Imaging;
 using XPXel.Core.Primitives;
 using XPXel.Core.Rendering;
+using XPXel.Core.Text;
 using XPXel.Formats.Png;
 
 namespace XPXel.Formats.Project;
@@ -143,6 +144,7 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
 
         RestoreFrames(document, manifest);
         RestoreLayers(document, manifest);
+        RestoreTags(document, manifest);
         RestoreCels(archive, document, manifest);
         RestorePalette(document, manifest);
 
@@ -171,6 +173,46 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
         }
     }
 
+    /// <summary>
+    /// Rebuilds the document's named animations.
+    /// </summary>
+    /// <remarks>
+    /// Ranges are clamped to the timeline that was actually loaded, and a tag left covering
+    /// nothing is dropped. A hand-edited or truncated file should open showing what it can
+    /// rather than presenting an animation that exports as an empty sheet.
+    /// </remarks>
+    private static void RestoreTags(PixelDocument document, ProjectManifest manifest)
+    {
+        if (manifest.Tags.Count == 0)
+        {
+            return;
+        }
+
+        int lastFrame = document.Frames.Count - 1;
+        List<AnimationTag> tags = [];
+
+        foreach (TagManifest entry in manifest.Tags)
+        {
+            int from = Math.Clamp(entry.From, 0, lastFrame);
+            int to = Math.Clamp(entry.To, from, lastFrame);
+
+            AnimationTag tag = new(ParseId(entry.Id, "tag"), entry.Name, from, to)
+            {
+                RepeatCount = entry.RepeatCount,
+                Direction = Enum.TryParse(entry.Direction, ignoreCase: true, out LoopDirection direction)
+                    ? direction
+                    : LoopDirection.Forward,
+                Color = entry.Color is { Length: > 0 } hex && PixelColor.TryParseHex(hex, out PixelColor color)
+                    ? color
+                    : null,
+            };
+
+            tags.Add(tag);
+        }
+
+        document.ReplaceTags(tags);
+    }
+
     private static void RestoreLayers(PixelDocument document, ProjectManifest manifest)
     {
         foreach (LayerManifest entry in manifest.Layers)
@@ -186,6 +228,7 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
         LayerNode layer = entry.Type switch
         {
             ProjectSchema.GroupLayerType => new GroupLayer(id, entry.Name),
+            ProjectSchema.TextLayerType => RestoreTextLayer(id, entry),
             _ => new RasterLayer(id, entry.Name),
         };
 
@@ -215,6 +258,47 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
                 RestoreLayer(document, child, group);
             }
         }
+    }
+
+    /// <summary>
+    /// Rebuilds a text layer's words and typography from the manifest.
+    /// </summary>
+    /// <remarks>
+    /// Nothing here is allowed to fail the load. A missing text block, an unrecognised
+    /// alignment name and an unparseable colour all fall back to a default, because the
+    /// layer's rendered pixels are in the archive either way — refusing to open a project
+    /// over a typo in a style value would lose the artwork to protect the formatting.
+    /// </remarks>
+    private static TextLayer RestoreTextLayer(Guid id, LayerManifest entry)
+    {
+        TextLayer layer = new(id, entry.Name);
+
+        if (entry.Text is not { } text)
+        {
+            return layer;
+        }
+
+        layer.Text = text.Content;
+        layer.Origin = new ImagePoint(text.OriginX, text.OriginY);
+
+        TextStyle style = layer.Style;
+        style.FontFamily = text.FontFamily;
+        style.FontSize = text.FontSize;
+        style.IsBold = text.IsBold;
+        style.IsItalic = text.IsItalic;
+        style.IsUnderline = text.IsUnderline;
+        style.IsStrikethrough = text.IsStrikethrough;
+        style.LineSpacing = text.LineSpacing;
+        style.LetterSpacing = text.LetterSpacing;
+        style.IsAntiAliased = text.IsAntiAliased;
+
+        style.Alignment = Enum.TryParse(text.Alignment, ignoreCase: true, out TextAlignment alignment)
+            ? alignment
+            : TextAlignment.Left;
+
+        style.Color = PixelColor.TryParseHex(text.Color, out PixelColor color) ? color : PixelColor.Black;
+
+        return layer;
     }
 
     private static void RestoreCels(ZipArchive archive, PixelDocument document, ProjectManifest manifest)
@@ -298,6 +382,20 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
             manifest.Layers.Add(BuildLayerManifest(layer));
         }
 
+        foreach (AnimationTag tag in document.Tags)
+        {
+            manifest.Tags.Add(new TagManifest
+            {
+                Id = tag.Id.ToString("D", CultureInfo.InvariantCulture),
+                Name = tag.Name,
+                From = tag.From,
+                To = tag.To,
+                Direction = tag.Direction.ToString(),
+                RepeatCount = tag.RepeatCount,
+                Color = tag.Color?.ToHex(),
+            });
+        }
+
         foreach (PixelColor color in document.Palette.Colors)
         {
             manifest.Palette.Colors.Add(color.ToHex());
@@ -340,7 +438,12 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
         LayerManifest entry = new()
         {
             Id = layer.Id.ToString("D", CultureInfo.InvariantCulture),
-            Type = layer is GroupLayer ? ProjectSchema.GroupLayerType : ProjectSchema.RasterLayerType,
+            Type = layer switch
+            {
+                GroupLayer => ProjectSchema.GroupLayerType,
+                TextLayer => ProjectSchema.TextLayerType,
+                _ => ProjectSchema.RasterLayerType,
+            },
             Name = layer.Name,
             IsVisible = layer.IsVisible,
             IsLocked = layer.IsLocked,
@@ -357,7 +460,35 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
             }
         }
 
+        if (layer is TextLayer text)
+        {
+            entry.Text = BuildTextManifest(text);
+        }
+
         return entry;
+    }
+
+    private static TextManifest BuildTextManifest(TextLayer layer)
+    {
+        TextStyle style = layer.Style;
+
+        return new TextManifest
+        {
+            Content = layer.Text,
+            OriginX = layer.Origin.X,
+            OriginY = layer.Origin.Y,
+            FontFamily = style.FontFamily,
+            FontSize = style.FontSize,
+            IsBold = style.IsBold,
+            IsItalic = style.IsItalic,
+            IsUnderline = style.IsUnderline,
+            IsStrikethrough = style.IsStrikethrough,
+            Alignment = style.Alignment.ToString(),
+            LineSpacing = style.LineSpacing,
+            LetterSpacing = style.LetterSpacing,
+            IsAntiAliased = style.IsAntiAliased,
+            Color = style.Color.ToHex(),
+        };
     }
 
     private static void WriteManifest(ZipArchive archive, ProjectManifest manifest)

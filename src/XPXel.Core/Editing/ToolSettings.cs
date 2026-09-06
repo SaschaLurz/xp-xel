@@ -1,5 +1,6 @@
 using XPXel.Core.ComponentModel;
 using XPXel.Core.Drawing;
+using XPXel.Core.Text;
 
 namespace XPXel.Core.Editing;
 
@@ -23,8 +24,11 @@ public sealed class ToolSettings : ObservableModel
 {
     private int _brushSize = 1;
     private BrushShape _brushShape = BrushShape.Square;
+    private int _brushSoftness;
+    private int _brushStabilization;
     private int _fillTolerance;
     private bool _isFillContiguous = true;
+    private bool _isShapeFilled;
 
     /// <summary>
     /// The width of the brush in pixels, at least 1. A size of 1 — a single pixel — is the
@@ -41,6 +45,36 @@ public sealed class ToolSettings : ObservableModel
     {
         get => _brushShape;
         set => SetProperty(ref _brushShape, value);
+    }
+
+    /// <summary>
+    /// How far in from the rim a brush fades, as a percentage. Zero — a hard edge — is the
+    /// default, because that is the only setting that produces the exact colours pixel art
+    /// is made of.
+    /// </summary>
+    /// <remarks>
+    /// Honoured by tools that opt into it. The pencil deliberately ignores it: a pencil that
+    /// laid down half-transparent pixels would stop being a pencil.
+    /// </remarks>
+    public int BrushSoftness
+    {
+        get => _brushSoftness;
+        set => SetProperty(ref _brushSoftness, Math.Clamp(value, 0, 100));
+    }
+
+    /// <summary>
+    /// How much a freehand stroke's path is smoothed, as a percentage. Zero — the pointer's
+    /// exact path — is the default.
+    /// </summary>
+    /// <remarks>
+    /// Distinct from <see cref="BrushSoftness"/>, and the distinction is worth keeping
+    /// straight: softness changes what one stamp looks like, stabilisation changes where the
+    /// stamps are placed. See <see cref="Drawing.StrokeStabilizer"/>.
+    /// </remarks>
+    public int BrushStabilization
+    {
+        get => _brushStabilization;
+        set => SetProperty(ref _brushStabilization, Math.Clamp(value, 0, 100));
     }
 
     /// <summary>
@@ -64,4 +98,25 @@ public sealed class ToolSettings : ObservableModel
         get => _isFillContiguous;
         set => SetProperty(ref _isFillContiguous, value);
     }
+
+    /// <summary>
+    /// Whether the rectangle and ellipse tools fill their shape or draw a one-pixel outline.
+    /// Outline is the default, since a filled shape is an outline plus a bucket fill but not
+    /// the other way round.
+    /// </summary>
+    public bool IsShapeFilled
+    {
+        get => _isShapeFilled;
+        set => SetProperty(ref _isShapeFilled, value);
+    }
+
+    /// <summary>
+    /// The typography a newly created text layer starts with.
+    /// </summary>
+    /// <remarks>
+    /// These are defaults, not live document state. Once a text layer exists it owns its own
+    /// <see cref="TextStyle"/>, and the text panel edits that instead — which is what lets
+    /// two text layers in one document use different fonts.
+    /// </remarks>
+    public TextStyle TextDefaults { get; } = new();
 }

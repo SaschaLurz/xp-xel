@@ -128,13 +128,15 @@ public partial class EditorDocumentView : UserControl
     /// Whether this document's canvas should claim the space key right now.
     /// </summary>
     /// <remarks>
-    /// Two conditions. The tab has to actually be on screen, or a background tab would pan
-    /// invisibly and every open document would fight over the key. And no text box may have
-    /// focus, because renaming a layer to "Front Arm" needs the space to reach the box.
+    /// Three conditions. The tab has to actually be on screen, or a background tab would pan
+    /// invisibly and every open document would fight over the key. No text box may have
+    /// focus, because renaming a layer to "Front Arm" needs the space to reach the box. And
+    /// the canvas must not be in the middle of a text edit, which is the same rule applied to
+    /// the one text field that is not a text box.
     /// </remarks>
     private bool CanTakeSpaceKey()
     {
-        if (!IsEffectivelyVisible)
+        if (!IsEffectivelyVisible || Canvas.IsEditingText)
         {
             return false;
         }

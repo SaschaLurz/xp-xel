@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using XPXel.Core.Animation;
 using XPXel.Core.Documents;
 using XPXel.Core.Imaging;
 using XPXel.Core.Primitives;
@@ -40,6 +41,7 @@ namespace XPXel.UI.Rendering;
 public sealed class DocumentRenderTarget : IDisposable
 {
     private readonly LayerCompositor _compositor = new();
+    private readonly OnionSkinCompositor _onionCompositor = new();
 
     private PixelBuffer _composited;
     private WriteableBitmap _bitmap;
@@ -75,7 +77,36 @@ public sealed class DocumentRenderTarget : IDisposable
     /// <param name="document">The document to render.</param>
     /// <param name="frame">The frame to render.</param>
     /// <returns>The up-to-date bitmap.</returns>
-    public WriteableBitmap GetBitmap(PixelDocument document, Frame frame)
+    public WriteableBitmap GetBitmap(PixelDocument document, Frame frame) =>
+        GetBitmap(document, frame, onionSkin: null, range: null);
+
+    /// <summary>
+    /// Returns the composited bitmap, optionally with the neighbouring frames ghosted under
+    /// the current one.
+    /// </summary>
+    /// <param name="document">The document to composite.</param>
+    /// <param name="frame">The frame being edited.</param>
+    /// <param name="onionSkin">
+    /// How to ghost the neighbouring frames, or <see langword="null"/> for none.
+    /// </param>
+    /// <param name="range">
+    /// The animation the ghosts may be taken from, so onion skinning inside one motion does
+    /// not reach into the next.
+    /// </param>
+    /// <returns>The bitmap, brought up to date within the dirty region.</returns>
+    /// <remarks>
+    /// The ghosts are composited into the same buffer as the artwork rather than drawn as a
+    /// separate layer over it. Doing it here means they go through the identical premultiply
+    /// and upload path as everything else, and it means the colour picker samples what is
+    /// actually on screen — including, deliberately, nothing of the ghosts, because
+    /// <see cref="SampleComposite"/> reads this buffer and an artist picking a colour wants
+    /// the drawing, not a tinted memory of the frame before it.
+    /// </remarks>
+    public WriteableBitmap GetBitmap(
+        PixelDocument document,
+        Frame frame,
+        OnionSkinSettings? onionSkin,
+        AnimationTag? range)
     {
         ArgumentNullException.ThrowIfNull(document);
 
@@ -87,7 +118,21 @@ public sealed class DocumentRenderTarget : IDisposable
 
         if (!_dirtyRegion.IsEmpty)
         {
-            _compositor.Compose(document, frame, _composited, _dirtyRegion);
+            if (onionSkin is { IsEnabled: true })
+            {
+                _onionCompositor.Compose(
+                    document,
+                    document.IndexOfFrame(frame),
+                    _composited,
+                    _dirtyRegion,
+                    onionSkin,
+                    range);
+            }
+            else
+            {
+                _compositor.Compose(document, frame, _composited, _dirtyRegion);
+            }
+
             UploadRegion(_dirtyRegion);
             _dirtyRegion = ImageRect.Empty;
         }

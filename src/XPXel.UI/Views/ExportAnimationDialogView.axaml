@@ -1,0 +1,136 @@
+<!--
+  The animation export dialog.
+
+  The format list is the exporter registry and each entry explains itself, so this file
+  contains no knowledge of any particular format - and, more usefully, the differences that
+  matter to the choice are stated where the choice is made.
+
+  The sheet controls hide themselves for formats that have no layout, because offering a
+  control that quietly does nothing is worse than offering none.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:anim="using:XPXel.Formats.Animation"
+             xmlns:conv="using:XPXel.UI.Converters"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:docs="using:XPXel.Core.Documents"
+             xmlns:sys="using:System"
+             x:Class="XPXel.UI.Views.ExportAnimationDialogView"
+             x:DataType="dialogs:ExportAnimationDialogViewModel">
+
+  <Border Classes="dialogSurface" MaxWidth="520">
+    <StackPanel Spacing="12">
+
+      <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+
+      <!-- ============================================================================
+           Format
+           ============================================================================ -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="FORMAT" Classes="panelHeader" Margin="0" />
+        <ComboBox ItemsSource="{Binding Exporters}"
+                  SelectedItem="{Binding SelectedExporter, Mode=TwoWay}"
+                  HorizontalAlignment="Stretch">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="anim:IAnimationExporter">
+              <TextBlock Text="{Binding Descriptor.DisplayName}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <TextBlock Text="{Binding FormatSummary}" Classes="subtle" TextWrapping="Wrap" />
+      </StackPanel>
+
+      <!-- ============================================================================
+           What to export
+           ============================================================================ -->
+      <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+
+        <StackPanel Grid.Column="0" Spacing="4">
+          <TextBlock Text="NAME" Classes="panelHeader" Margin="0" />
+          <TextBox Text="{Binding BaseName, Mode=TwoWay}" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="1" Spacing="4" IsVisible="{Binding HasTags}">
+          <TextBlock Text="ANIMATION" Classes="panelHeader" Margin="0" />
+          <ComboBox ItemsSource="{Binding Tags}"
+                    SelectedItem="{Binding SelectedTagChoice, Mode=TwoWay}"
+                    HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="dialogs:ExportTagChoice">
+                <TextBlock Text="{Binding Name}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+
+      </Grid>
+
+      <!-- ============================================================================
+           Sheet arrangement
+           ============================================================================ -->
+      <StackPanel Spacing="8" IsVisible="{Binding ShowsSheetOptions}">
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="ARRANGEMENT" Classes="panelHeader" Margin="0" />
+          <ComboBox ItemsSource="{x:Static dialogs:ExportAnimationDialogViewModel.Layouts}"
+                    SelectedItem="{Binding Layout, Mode=TwoWay}"
+                    HorizontalAlignment="Stretch"
+                    ToolTip.Tip="One row per animation is the readable character sheet; a grid packs tightest">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="anim:SpriteSheetLayout">
+                <TextBlock Text="{Binding Converter={x:Static conv:EnumDisplayConverter.Instance}}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+        </StackPanel>
+
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalAlignment="Center">
+          <CheckBox Grid.Column="0"
+                    IsChecked="{Binding SeparateFilePerTag, Mode=TwoWay}"
+                    Content="One sheet per animation"
+                    ToolTip.Tip="Off puts every animation on one sheet, with the ranges in the metadata" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+            <TextBlock Text="Padding" Classes="subtle" VerticalAlignment="Center" />
+            <NumericUpDown Value="{Binding Padding, Mode=TwoWay}"
+                           Minimum="0" Maximum="16" Increment="1"
+                           FormatString="0" ShowButtonSpinner="False" Width="56"
+                           ToolTip.Tip="Transparent margin around each cell, for renderers that sample outside a sprite" />
+          </StackPanel>
+        </Grid>
+
+        <CheckBox IsChecked="{Binding IncludeMetadata, Mode=TwoWay}"
+                  Content="Write the .json metadata"
+                  ToolTip.Tip="Frame rectangles, timings and animation names. Godot, Phaser and most importers read it." />
+
+      </StackPanel>
+
+      <!-- ============================================================================
+           Size and outcome
+           ============================================================================ -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="SCALE" Classes="panelHeader" Margin="0" />
+        <ComboBox ItemsSource="{x:Static dialogs:ExportAnimationDialogViewModel.Scales}"
+                  SelectedItem="{Binding Scale, Mode=TwoWay}"
+                  HorizontalAlignment="Stretch"
+                  ToolTip.Tip="Enlarged with nearest-neighbour sampling, so the pixels stay square">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="sys:Int32">
+              <TextBlock Text="{Binding StringFormat='{}{0}×'}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </StackPanel>
+
+      <Border Background="{DynamicResource XpTimelineColumnBrush}" CornerRadius="4" Padding="8,6">
+        <TextBlock Text="{Binding OutcomeText}" TextWrapping="Wrap" Classes="subtle" />
+      </Border>
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="88" />
+        <Button Content="Export…" Command="{Binding ConfirmCommand}" MinWidth="88" IsDefault="True" />
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+
+</UserControl>

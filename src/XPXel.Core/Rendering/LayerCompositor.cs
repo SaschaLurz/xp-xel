@@ -111,9 +111,12 @@ public sealed class LayerCompositor
 
             switch (child)
             {
-                case RasterLayer raster:
+                // Raster and text layers both keep their pixels in a cel, so they composite
+                // identically. That is the whole reason text was built on cels rather than on
+                // a layer-owned buffer: it cost the renderer one extra type in this pattern.
+                case RasterLayer or TextLayer:
                 {
-                    Cel? cel = document.Cels.Find(raster.Id, frame.Id);
+                    Cel? cel = document.Cels.Find(child.Id, frame.Id);
                     if (cel is not null)
                     {
                         BlendInto(
@@ -121,8 +124,8 @@ public sealed class LayerCompositor
                             cel.Offset,
                             target,
                             region,
-                            raster.BlendMode,
-                            raster.Opacity * cel.Opacity);
+                            child.BlendMode,
+                            child.Opacity * cel.Opacity);
                     }
 
                     break;

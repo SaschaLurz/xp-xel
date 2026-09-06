@@ -59,6 +59,17 @@ public sealed class ToolContext
     public SelectionMask? Selection => Workspace.Selection;
 
     /// <summary>
+    /// Geometry the active tool wants the canvas to draw on top of the artwork while an
+    /// interaction is in progress.
+    /// </summary>
+    /// <remarks>
+    /// One overlay per document, so a marquee dragged on one tab does not appear on another.
+    /// See <see cref="ToolOverlay"/> for why some previews go here and others are drawn
+    /// straight onto the layer.
+    /// </remarks>
+    public ToolOverlay Overlay { get; } = new();
+
+    /// <summary>
     /// Reads a pixel of the flattened image at the given image coordinate, or
     /// <see langword="null"/> when no flattened image is available.
     /// </summary>

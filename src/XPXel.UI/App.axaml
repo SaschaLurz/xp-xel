@@ -50,12 +50,36 @@
       <views:ColorPanelView />
     </DataTemplate>
 
+    <DataTemplate DataType="vm:BrushPanelViewModel">
+      <views:BrushPanelView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:TextPanelViewModel">
+      <views:TextPanelView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:TimelineViewModel">
+      <views:TimelineView />
+    </DataTemplate>
+
+    <DataTemplate DataType="vm:PreviewPanelViewModel">
+      <views:PreviewPanelView />
+    </DataTemplate>
+
     <DataTemplate DataType="dialogs:ConfirmDialogViewModel">
       <views:ConfirmDialogView />
     </DataTemplate>
 
     <DataTemplate DataType="dialogs:NewDocumentDialogViewModel">
       <views:NewDocumentDialogView />
+    </DataTemplate>
+
+    <DataTemplate DataType="dialogs:ExportAnimationDialogViewModel">
+      <views:ExportAnimationDialogView />
+    </DataTemplate>
+
+    <DataTemplate DataType="dialogs:CanvasSizeDialogViewModel">
+      <views:CanvasSizeDialogView />
     </DataTemplate>
 
   </Application.DataTemplates>

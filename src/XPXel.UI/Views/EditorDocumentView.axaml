@@ -5,25 +5,208 @@
   commands need somewhere to live. Zoom-to-fit depends on the viewport size, which only the
   canvas control knows, so the shell raises a request on the document and this view — which
   is the only thing that knows which canvas belongs to which document — forwards it.
+
+  The canvas also carries the tool settings flyout, opened by right-clicking the artwork. It
+  is declared here rather than inside PixelCanvasControl because the control belongs to
+  XPXel.UI.Controls and knows nothing about view models; hanging the flyout on it from the
+  view keeps that separation and lets the panel bind straight to the toolbox.
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="using:XPXel.UI.Controls"
              xmlns:docking="using:XPXel.UI.Docking"
+             xmlns:vm="using:XPXel.UI.ViewModels"
              x:Class="XPXel.UI.Views.EditorDocumentView"
              x:DataType="docking:EditorDocument">
 
-  <controls:PixelCanvasControl x:Name="PixelCanvas"
-                               Workspace="{Binding Workspace}"
-                               ToolContext="{Binding ToolContext}"
-                               ActiveTool="{Binding Toolbox.ActiveTool}"
-                               ShowPixelGrid="{Binding CanvasSettings.ShowPixelGrid}"
-                               Zoom="{Binding Zoom, Mode=TwoWay}"
-                               HoveredPixel="{Binding HoveredPixel, Mode=TwoWay}"
-                               CanvasBackground="{DynamicResource XpCanvasBackgroundBrush}"
-                               CanvasBorderBrush="{DynamicResource XpCanvasBorderBrush}"
-                               PixelGridBrush="{DynamicResource XpPixelGridBrush}"
-                               CheckerboardLight="{DynamicResource XpCheckerLightColor}"
-                               CheckerboardDark="{DynamicResource XpCheckerDarkColor}" />
+  <!-- ==================================================================================
+       Rulers and canvas.
+
+       The rulers sit outside the canvas rather than being drawn on top of it, so that they
+       are never scrolled or zoomed away, and they are bound to the canvas's own transform so
+       the numbers line up with the artwork exactly. The corner box fills the square where the
+       two rulers meet, which would otherwise show the window through it.
+       ================================================================================== -->
+  <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,*">
+
+    <Border Grid.Row="0" Grid.Column="0"
+            Width="20" Height="20"
+            Background="{DynamicResource XpPanelBackgroundBrush}"
+            BorderBrush="{DynamicResource XpPanelBorderBrush}"
+            BorderThickness="0,0,1,1"
+            IsVisible="{Binding CanvasSettings.ShowRulers}" />
+
+    <controls:CanvasRulerControl Grid.Row="0" Grid.Column="1"
+                                 Orientation="Horizontal"
+                                 Height="20"
+                                 IsVisible="{Binding CanvasSettings.ShowRulers}"
+                                 ViewTransform="{Binding #PixelCanvas.ViewTransform}"
+                                 DocumentSize="{Binding #PixelCanvas.DocumentSize}"
+                                 HoveredPixel="{Binding #PixelCanvas.HoveredPixel}"
+                                 Background="{DynamicResource XpPanelBackgroundBrush}"
+                                 Foreground="{DynamicResource XpSubtleForegroundBrush}"
+                                 BorderBrush="{DynamicResource XpPanelBorderBrush}"
+                                 HighlightBrush="{DynamicResource XpRulerHighlightBrush}" />
+
+    <controls:CanvasRulerControl Grid.Row="1" Grid.Column="0"
+                                 Orientation="Vertical"
+                                 Width="20"
+                                 IsVisible="{Binding CanvasSettings.ShowRulers}"
+                                 ViewTransform="{Binding #PixelCanvas.ViewTransform}"
+                                 DocumentSize="{Binding #PixelCanvas.DocumentSize}"
+                                 HoveredPixel="{Binding #PixelCanvas.HoveredPixel}"
+                                 Background="{DynamicResource XpPanelBackgroundBrush}"
+                                 Foreground="{DynamicResource XpSubtleForegroundBrush}"
+                                 BorderBrush="{DynamicResource XpPanelBorderBrush}"
+                                 HighlightBrush="{DynamicResource XpRulerHighlightBrush}" />
+
+    <controls:PixelCanvasControl x:Name="PixelCanvas"
+                                 Grid.Row="1" Grid.Column="1"
+                                 Workspace="{Binding Workspace}"
+                                 ToolContext="{Binding ToolContext}"
+                                 ActiveTool="{Binding Toolbox.ActiveTool}"
+                                 ShowPixelGrid="{Binding CanvasSettings.ShowPixelGrid}"
+                                 ShowColorSwatch="{Binding CanvasSettings.ShowColorSwatchCursor}"
+                                 OnionSkin="{Binding CanvasSettings.OnionSkin}"
+                                 Zoom="{Binding Zoom, Mode=TwoWay}"
+                                 HoveredPixel="{Binding HoveredPixel, Mode=TwoWay}"
+                                 CanvasBackground="{DynamicResource XpCanvasBackgroundBrush}"
+                                 CanvasBorderBrush="{DynamicResource XpCanvasBorderBrush}"
+                                 PixelGridBrush="{DynamicResource XpPixelGridBrush}"
+                                 CheckerboardLight="{DynamicResource XpCheckerLightColor}"
+                                 CheckerboardDark="{DynamicResource XpCheckerDarkColor}"
+                                 HighlightBrush="{DynamicResource XpCanvasHighlightBrush}"
+                                 HighlightShadowBrush="{DynamicResource XpCanvasHighlightShadowBrush}">
+
+      <!-- ================================================================================
+           The tool settings panel, opened by right-clicking the canvas.
+
+           Only the groups the active tool actually uses are shown, so right-clicking with the
+           bucket asks about tolerance and right-clicking with the pencil asks about the brush.
+           Which groups those are comes from ToolPresentations, beside the tool's icon and its
+           cursor, so a tool gains a settings panel by declaring what it uses rather than by
+           this file growing another block.
+
+           Every path is written from the document rather than switching DataContext to the
+           toolbox, because x:DataType applies to the element it is declared on — including its
+           own DataContext binding — and the compiled binding would then look for Toolbox on
+           ToolboxViewModel.
+           ================================================================================ -->
+      <controls:PixelCanvasControl.ContextFlyout>
+        <Flyout Placement="Pointer">
+          <StackPanel Spacing="10" MinWidth="250">
+
+            <TextBlock Text="{Binding Toolbox.ActiveToolName}" FontWeight="SemiBold" />
+
+            <TextBlock Text="This tool has no settings of its own."
+                       Classes="subtle"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding !Toolbox.HasToolOptions}" />
+
+            <!-- Brush -->
+            <StackPanel Spacing="6" IsVisible="{Binding Toolbox.ShowsBrushOptions}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Size" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="8,0"
+                        Minimum="1" Maximum="64"
+                        Value="{Binding Toolbox.ToolSettings.BrushSize, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Toolbox.ToolSettings.BrushSize}"
+                           Classes="subtle"
+                           Width="30"
+                           TextAlignment="Right"
+                           VerticalAlignment="Center" />
+              </Grid>
+
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Shape" Classes="subtle" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" Margin="8,0,0,0"
+                          HorizontalAlignment="Stretch"
+                          ItemsSource="{x:Static vm:ToolboxViewModel.BrushShapes}"
+                          SelectedItem="{Binding Toolbox.ToolSettings.BrushShape, Mode=TwoWay}" />
+              </Grid>
+
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Softness" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="8,0"
+                        Minimum="0" Maximum="100"
+                        Value="{Binding Toolbox.ToolSettings.BrushSoftness, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Toolbox.ToolSettings.BrushSoftness}"
+                           Classes="subtle"
+                           Width="30"
+                           TextAlignment="Right"
+                           VerticalAlignment="Center" />
+              </Grid>
+
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Smoothing" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="8,0"
+                        Minimum="0" Maximum="100"
+                        Value="{Binding Toolbox.ToolSettings.BrushStabilization, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Toolbox.ToolSettings.BrushStabilization}"
+                           Classes="subtle"
+                           Width="30"
+                           TextAlignment="Right"
+                           VerticalAlignment="Center" />
+              </Grid>
+            </StackPanel>
+
+            <!-- Shapes -->
+            <CheckBox Content="Filled"
+                      IsVisible="{Binding Toolbox.ShowsShapeOptions}"
+                      IsChecked="{Binding Toolbox.ToolSettings.IsShapeFilled, Mode=TwoWay}"
+                      ToolTip.Tip="Fill the shape rather than outlining it" />
+
+            <!-- Flood fill -->
+            <StackPanel Spacing="6" IsVisible="{Binding Toolbox.ShowsFillOptions}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Tolerance" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="8,0"
+                        Minimum="0" Maximum="255"
+                        Value="{Binding Toolbox.ToolSettings.FillTolerance, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Toolbox.ToolSettings.FillTolerance}"
+                           Classes="subtle"
+                           Width="30"
+                           TextAlignment="Right"
+                           VerticalAlignment="Center" />
+              </Grid>
+
+              <CheckBox Content="Contiguous"
+                        IsChecked="{Binding Toolbox.ToolSettings.IsFillContiguous, Mode=TwoWay}"
+                        ToolTip.Tip="Fill only the pixels connected to the one clicked" />
+            </StackPanel>
+
+            <!-- Text -->
+            <StackPanel Spacing="6" IsVisible="{Binding Toolbox.ShowsTextOptions}">
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Size" Classes="subtle" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Margin="8,0,0,0"
+                               Minimum="4" Maximum="256" Increment="1" FormatString="0"
+                               Value="{Binding Toolbox.ToolSettings.TextDefaults.FontSize, Mode=TwoWay}" />
+              </Grid>
+
+              <StackPanel Orientation="Horizontal" Spacing="12">
+                <CheckBox Content="Bold"
+                          IsChecked="{Binding Toolbox.ToolSettings.TextDefaults.IsBold, Mode=TwoWay}" />
+                <CheckBox Content="Italic"
+                          IsChecked="{Binding Toolbox.ToolSettings.TextDefaults.IsItalic, Mode=TwoWay}" />
+              </StackPanel>
+
+              <TextBlock Text="Typeface and alignment are in the Text panel."
+                         Classes="subtle"
+                         FontSize="11"
+                         TextWrapping="Wrap" />
+            </StackPanel>
+
+          </StackPanel>
+        </Flyout>
+      </controls:PixelCanvasControl.ContextFlyout>
+
+    </controls:PixelCanvasControl>
+
+  </Grid>
 
 </UserControl>

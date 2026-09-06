@@ -216,6 +216,94 @@ public sealed class ToolTests
         Assert.Equal(0, fixture.Workspace.History.Count);
     }
 
+    [Fact]
+    public void HoldingShiftLocksAStrokeToTheDirectionItSetsOff()
+    {
+        Fixture fixture = new();
+        PencilTool pencil = new();
+
+        Press(pencil, fixture, 0, 4);
+        MoveWithShift(pencil, fixture, 3, 4);
+
+        // Set off horizontally, so the vertical component of everything after it is refused.
+        MoveWithShift(pencil, fixture, 6, 7);
+        Release(pencil, fixture, 6, 7);
+
+        for (int x = 0; x <= 6; x++)
+        {
+            Assert.Equal(Red, fixture.ActiveCel.Pixels.GetPixel(x, 4));
+        }
+
+        Assert.Equal(PixelColor.Transparent, fixture.ActiveCel.Pixels.GetPixel(6, 7));
+    }
+
+    [Fact]
+    public void AShiftLockedStrokeChoosesItsAxisFromTheFirstMovement()
+    {
+        Fixture fixture = new();
+        PencilTool pencil = new();
+
+        Press(pencil, fixture, 4, 0);
+        MoveWithShift(pencil, fixture, 5, 3);
+        Release(pencil, fixture, 5, 3);
+
+        // Three down against one across: the artist meant down.
+        for (int y = 0; y <= 3; y++)
+        {
+            Assert.Equal(Red, fixture.ActiveCel.Pixels.GetPixel(4, y));
+        }
+
+        Assert.Equal(PixelColor.Transparent, fixture.ActiveCel.Pixels.GetPixel(5, 3));
+    }
+
+    [Fact]
+    public void LettingGoOfShiftAndPressingItAgainPicksTheOtherAxis()
+    {
+        Fixture fixture = new();
+        PencilTool pencil = new();
+
+        Press(pencil, fixture, 0, 0);
+        MoveWithShift(pencil, fixture, 4, 0);
+
+        // Releasing shift is what re-arms the choice, so the corner is turned without ever
+        // lifting the button.
+        Move(pencil, fixture, 4, 0);
+        MoveWithShift(pencil, fixture, 4, 5);
+        Release(pencil, fixture, 4, 5);
+
+        for (int x = 0; x <= 4; x++)
+        {
+            Assert.Equal(Red, fixture.ActiveCel.Pixels.GetPixel(x, 0));
+        }
+
+        for (int y = 0; y <= 5; y++)
+        {
+            Assert.Equal(Red, fixture.ActiveCel.Pixels.GetPixel(4, y));
+        }
+    }
+
+    [Fact]
+    public void AReleasedStrokeIsNotRolledBackByTheNextOne()
+    {
+        Fixture fixture = new();
+        PencilTool pencil = new();
+        EraserTool eraser = new();
+
+        Press(pencil, fixture, 1, 1);
+        Release(pencil, fixture, 1, 1);
+
+        // The canvas hands a stroke over when the tool changes under a held button, which ends
+        // the outgoing tool's session properly. What must never happen is the erased pixel
+        // coming back when the pencil is next pressed, which is what an abandoned session did.
+        Press(eraser, fixture, 1, 1);
+        Release(eraser, fixture, 1, 1);
+
+        Press(pencil, fixture, 5, 5);
+        Release(pencil, fixture, 5, 5);
+
+        Assert.Equal(PixelColor.Transparent, fixture.ActiveCel.Pixels.GetPixel(1, 1));
+    }
+
     private static void Press(ITool tool, Fixture fixture, int x, int y, ToolPointerButton button = ToolPointerButton.Left) =>
         tool.OnPointerPressed(fixture.Context, new ToolPointerEventArgs(new ImagePoint(x, y), button));
 
@@ -224,6 +312,11 @@ public sealed class ToolTests
 
     private static void Release(ITool tool, Fixture fixture, int x, int y, ToolPointerButton button = ToolPointerButton.Left) =>
         tool.OnPointerReleased(fixture.Context, new ToolPointerEventArgs(new ImagePoint(x, y), button));
+
+    private static void MoveWithShift(ITool tool, Fixture fixture, int x, int y) =>
+        tool.OnPointerMoved(
+            fixture.Context,
+            new ToolPointerEventArgs(new ImagePoint(x, y), ToolPointerButton.Left, ToolModifiers.Shift));
 
     /// <summary>An 8x8 document with one layer, wired up exactly as the application does.</summary>
     private sealed class Fixture
