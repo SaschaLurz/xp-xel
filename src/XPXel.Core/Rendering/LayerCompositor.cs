@@ -65,7 +65,44 @@ public sealed class LayerCompositor
                 nameof(target));
         }
 
-        ImageRect area = region.Intersect(document.Bounds);
+        Compose(document, frame, target, region.Intersect(document.Bounds), ImagePoint.Origin);
+    }
+
+    /// <summary>
+    /// Flattens part of the document into a buffer that need not be the canvas, and need not be
+    /// positioned over it.
+    /// </summary>
+    /// <param name="document">The document to composite.</param>
+    /// <param name="frame">The frame to composite.</param>
+    /// <param name="target">The buffer to write into.</param>
+    /// <param name="region">The region to recompute, in document coordinates.</param>
+    /// <param name="origin">
+    /// Where <paramref name="target"/>'s own top-left corner sits in document coordinates.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the canvas is not the limit.</b> A layer keeps whatever has been moved off the
+    /// edge, so there is artwork outside the canvas — and the crop tool has to show it, or
+    /// dragging the frame outwards is a guess. Nothing else composites past the edge, and
+    /// nothing else should: what a document <em>is</em> stops at its bounds.
+    /// </para>
+    /// <para>
+    /// The region is not clipped to the document here, which is the only difference from the
+    /// canvas-sized overload beyond the offset.
+    /// </para>
+    /// </remarks>
+    public void Compose(
+        PixelDocument document,
+        Frame frame,
+        PixelBuffer target,
+        ImageRect region,
+        ImagePoint origin)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(target);
+
+        ImageRect area = region.Intersect(new ImageRect(origin, target.Size));
         if (area.IsEmpty)
         {
             return;
@@ -73,8 +110,8 @@ public sealed class LayerCompositor
 
         // Start from transparent: layers composite onto whatever is already there, so stale
         // content from a previous pass would show through where nothing is drawn.
-        target.FillRect(area, PixelColor.Transparent);
-        ComposeGroup(document.Root, document, frame, target, area, depth: 0);
+        target.FillRect(area.Translate(-origin.X, -origin.Y), PixelColor.Transparent);
+        ComposeGroup(document.Root, document, frame, target, origin, area, depth: 0);
     }
 
     /// <summary>
@@ -98,6 +135,7 @@ public sealed class LayerCompositor
         PixelDocument document,
         Frame frame,
         PixelBuffer target,
+        ImagePoint origin,
         ImageRect region,
         int depth)
     {
@@ -123,6 +161,7 @@ public sealed class LayerCompositor
                             cel.Pixels,
                             cel.Offset,
                             target,
+                            origin,
                             region,
                             child.BlendMode,
                             child.Opacity * cel.Opacity);
@@ -134,9 +173,12 @@ public sealed class LayerCompositor
                 case GroupLayer nested:
                 {
                     PixelBuffer scratch = RentScratch(depth, target.Size);
-                    scratch.FillRect(region, PixelColor.Transparent);
-                    ComposeGroup(nested, document, frame, scratch, region, depth + 1);
-                    BlendInto(scratch, ImagePoint.Origin, target, region, nested.BlendMode, nested.Opacity);
+                    scratch.FillRect(region.Translate(-origin.X, -origin.Y), PixelColor.Transparent);
+                    ComposeGroup(nested, document, frame, scratch, origin, region, depth + 1);
+
+                    // The scratch buffer shares the target's size and position, so it composites
+                    // back with the same origin.
+                    BlendInto(scratch, origin, target, origin, region, nested.BlendMode, nested.Opacity);
                     break;
                 }
 
@@ -157,12 +199,15 @@ public sealed class LayerCompositor
         PixelBuffer source,
         ImagePoint offset,
         PixelBuffer target,
+        ImagePoint targetOrigin,
         ImageRect region,
         BlendMode mode,
         double opacity)
     {
+        // Everything here is reasoned about in document coordinates and converted once, per
+        // row and per pixel, on the way into each buffer. Both buffers can now sit anywhere.
         ImageRect area = region
-            .Intersect(target.Bounds)
+            .Intersect(new ImageRect(targetOrigin, target.Size))
             .Intersect(new ImageRect(offset, source.Size));
 
         if (area.IsEmpty || opacity <= 0.0)
@@ -180,7 +225,7 @@ public sealed class LayerCompositor
         for (int y = area.Top; y < area.Bottom; y++)
         {
             ReadOnlySpan<byte> sourceRow = source.GetReadOnlyRowSpan(y - offset.Y);
-            Span<byte> targetRow = target.GetRowSpan(y);
+            Span<byte> targetRow = target.GetRowSpan(y - targetOrigin.Y);
 
             for (int x = area.Left; x < area.Right; x++)
             {
@@ -191,7 +236,7 @@ public sealed class LayerCompositor
                     continue;
                 }
 
-                int di = x * bpp;
+                int di = (x - targetOrigin.X) * bpp;
                 PixelColor sourceColor = new(sourceRow[si], sourceRow[si + 1], sourceRow[si + 2], sourceAlpha);
                 PixelColor targetColor = new(targetRow[di], targetRow[di + 1], targetRow[di + 2], targetRow[di + 3]);
 

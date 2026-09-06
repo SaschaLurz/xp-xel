@@ -1,6 +1,7 @@
 using XPXel.Core.ComponentModel;
 using XPXel.Core.Documents;
 using XPXel.Core.History;
+using XPXel.Core.Primitives;
 using XPXel.Core.Selection;
 
 namespace XPXel.Core.Editing;
@@ -371,6 +372,97 @@ public sealed class DocumentWorkspace : ObservableModel
         }
 
         return Document.GetOrCreateCel(layer, ActiveFrame);
+    }
+
+    /// <summary>
+    /// Returns the cel the active layer already occupies on the active frame, without
+    /// creating one.
+    /// </summary>
+    /// <returns>The cel, or <see langword="null"/> if the layer has nothing on this frame.</returns>
+    /// <remarks>
+    /// Text layers keep their glyphs in a cel exactly as raster layers keep their artwork, so
+    /// both are returned. Callers that intend to <em>write</em> want
+    /// <see cref="GetOrCreateActiveCel"/> instead; this is for the ones that only want to look,
+    /// and which must not leave an empty cel behind on a layer the artist merely clicked.
+    /// </remarks>
+    public Cel? FindActiveCel() => ActiveLayer is RasterLayer or TextLayer
+        ? Document.Cels.Find(ActiveLayer.Id, ActiveFrame.Id)
+        : null;
+
+    /// <summary>
+    /// Marks every pixel the given layer actually paints on the active frame.
+    /// </summary>
+    /// <param name="layer">The layer to mark, or a group, whose visible children are all marked.</param>
+    /// <returns><see langword="true"/> if anything was marked.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is what Ctrl-clicking a layer's preview does, and it is the fastest way to get a
+    /// selection shaped like a drawing rather than like a box: the artist has already drawn the
+    /// shape once, and asking them to trace it again with a wand is asking them to do the same
+    /// work twice.
+    /// </para>
+    /// <para>
+    /// <b>Only pixels that are actually painted.</b> A fully transparent pixel is not part of the
+    /// artwork however much of the canvas it covers, and marking it would make the following move
+    /// drag a rectangle of nothing along with the drawing.
+    /// </para>
+    /// </remarks>
+    public bool SelectLayerPixels(LayerNode layer)
+    {
+        ArgumentNullException.ThrowIfNull(layer);
+
+        SelectionMask mask = new(Document.Size);
+        MarkLayerPixels(layer, mask, isRoot: true);
+        mask.RecalculateBounds();
+
+        // An empty mask and no mask mean the same thing to every tool, but only the second says
+        // so: an empty one clips every drawing tool to nothing.
+        Selection = mask.IsEmpty ? null : mask;
+        return !mask.IsEmpty;
+    }
+
+    /// <summary>Adds one layer subtree's painted pixels to a mask.</summary>
+    /// <remarks>
+    /// The layer that was asked for is marked whether or not it is hidden — an artist who
+    /// Ctrl-clicks a hidden layer's preview plainly means that layer. Children inside a group
+    /// honour their own visibility, because there the question is what the group shows.
+    /// </remarks>
+    private void MarkLayerPixels(LayerNode layer, SelectionMask mask, bool isRoot)
+    {
+        if (!isRoot && (!layer.IsVisible || layer.Opacity <= 0.0))
+        {
+            return;
+        }
+
+        if (layer is GroupLayer group)
+        {
+            foreach (LayerNode child in group.Children)
+            {
+                MarkLayerPixels(child, mask, isRoot: false);
+            }
+
+            return;
+        }
+
+        if (Document.Cels.Find(layer.Id, ActiveFrame.Id) is not { } cel)
+        {
+            return;
+        }
+
+        // The cel may be larger than the canvas and sit at an offset, so only the part of it
+        // that is on the canvas can be marked; a mask has no room for the rest.
+        ImageRect visible = cel.Bounds.Intersect(Document.Bounds);
+
+        for (int y = visible.Top; y < visible.Bottom; y++)
+        {
+            for (int x = visible.Left; x < visible.Right; x++)
+            {
+                if (cel.Pixels.GetPixelOrTransparent(x - cel.Offset.X, y - cel.Offset.Y).A > 0)
+                {
+                    mask.SetCoverage(x, y, byte.MaxValue);
+                }
+            }
+        }
     }
 
     /// <summary>Records that the document has just been saved to <paramref name="filePath"/>.</summary>

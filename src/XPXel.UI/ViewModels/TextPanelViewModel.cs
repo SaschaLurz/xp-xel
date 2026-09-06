@@ -104,6 +104,7 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
         }
 
         FontSize = selected;
+        OnPropertyChanged(nameof(SelectedFontSize));
     }
 
     /// <summary>The fonts this machine can render, for the family list.</summary>
@@ -127,6 +128,31 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
 
     /// <summary>The smallest size the chosen font may be set to.</summary>
     public decimal MinimumFontSize => (decimal)TextStyle.GetMinimumFontSize(FontFamily);
+
+    /// <summary>
+    /// The size as the drop-down sees it: one of the offered sizes, or <see langword="null"/>
+    /// when the artist has typed a size that is not among them.
+    /// </summary>
+    /// <remarks>
+    /// The drop-down cannot bind to <see cref="FontSize"/> directly. A <c>ComboBox</c> whose
+    /// <c>SelectedItem</c> is not in its list reports null, and a two-way binding then writes
+    /// that null into a <see cref="decimal"/> — a failure logged on every keystroke, and the
+    /// reason a typed size such as 13 could not survive the panel refreshing itself. Reading
+    /// null here and ignoring it on the way back is what lets the box and the list disagree
+    /// peacefully.
+    /// </remarks>
+    public decimal? SelectedFontSize
+    {
+        get => AvailableFontSizes.Contains(FontSize) ? FontSize : null;
+
+        set
+        {
+            if (value is { } chosen)
+            {
+                FontSize = chosen;
+            }
+        }
+    }
 
     /// <summary>Gets a value indicating whether the built-in pixel font is chosen.</summary>
     public bool IsPixelFont => PixelFont.IsBuiltIn(FontFamily);
@@ -329,8 +355,22 @@ public sealed partial class TextPanelViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsPixelFont));
     }
 
-    partial void OnFontSizeChanged(decimal value) =>
+    partial void OnFontSizeChanged(decimal value)
+    {
+        // A size the font cannot render is corrected to the nearest one it can, rather than
+        // refused. Refusing leaves the artist guessing what the limit is — and the limit moves,
+        // because the pixel font counts in whole cells and an outline font does not.
+        decimal usable = (decimal)TextStyle.ClampFontSize((double)value, FontFamily);
+
+        if (usable != value)
+        {
+            FontSize = usable;
+            return;
+        }
+
+        OnPropertyChanged(nameof(SelectedFontSize));
         ApplyStyle("Change Font Size", s => s.FontSize = (double)value);
+    }
 
     partial void OnIsBoldChanged(bool value) => ApplyStyle("Bold", s => s.IsBold = value);
 

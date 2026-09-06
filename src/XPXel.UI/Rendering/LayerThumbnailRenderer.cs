@@ -116,9 +116,13 @@ internal static class LayerThumbnailRenderer
     {
         switch (layer)
         {
-            case RasterLayer raster:
+            // Text layers keep their glyphs in a cel exactly as raster layers keep their
+            // artwork — that was the whole point of building text on cels — so the two preview
+            // identically. Listing only raster layers here is what made a text layer preview as
+            // empty while its words were plainly on the canvas.
+            case RasterLayer or TextLayer:
             {
-                if (document.Cels.Find(raster.Id, frame.Id) is { } cel)
+                if (document.Cels.Find(layer.Id, frame.Id) is { } cel)
                 {
                     BlendCel(cel, target);
                 }

@@ -15,12 +15,18 @@ namespace XPXel.Core.Documents;
 /// frame list (time). Drawing tools always operate on a cel, never on a layer directly.
 /// </para>
 /// <para>
-/// <b>About <see cref="Offset"/>.</b> In v0.1 every cel buffer is the full canvas size and
-/// sits at (0, 0). The offset exists and is honoured by the compositor from day one so that
-/// <em>trimmed</em> cels — where the buffer covers only the layer's non-empty bounding box —
-/// can be introduced later purely as a storage optimisation. A large animated sprite sheet
-/// with mostly-empty layers is the case that will eventually need it, and a compositor that
-/// already respects offsets will need no change.
+/// <b>About <see cref="Offset"/>.</b> A cel buffer starts out the full canvas size at (0, 0),
+/// and stops being either the moment its layer is moved: what slides off the edge is kept, so
+/// the buffer grows and its top-left corner goes wherever it has to. The compositor has
+/// honoured the offset since v0.1, which is why moving a layer needed no change there.
+/// </para>
+/// <para>
+/// <b>The one invariant.</b> A cel's bounds always contain the whole canvas. Drawing tools
+/// write in document coordinates and would otherwise have to grow the buffer mid-stroke, which
+/// would invalidate every pixel index the undo session has recorded. Keeping the canvas covered
+/// at all times means the only two operations that can change a cel's geometry — moving a layer
+/// and resizing the canvas — are also the only two that have to think about it, and both do it
+/// through <see cref="CreateMoved"/>.
 /// </para>
 /// </remarks>
 public sealed class Cel : ObservableModel
@@ -54,8 +60,8 @@ public sealed class Cel : ObservableModel
     public PixelBuffer Pixels { get; }
 
     /// <summary>
-    /// Where the buffer's top-left corner sits in document coordinates. Always (0, 0) in
-    /// v0.1; see the type remarks for why it exists.
+    /// Where the buffer's top-left corner sits in document coordinates. (0, 0) until the
+    /// layer is moved or the canvas is resized around it; see the type remarks.
     /// </summary>
     public ImagePoint Offset
     {
@@ -75,6 +81,51 @@ public sealed class Cel : ObservableModel
 
     /// <summary>The region of document space this cel currently covers.</summary>
     public ImageRect Bounds => new(Offset, Pixels.Size);
+
+    /// <summary>
+    /// Creates a copy of this cel with its content shifted, big enough to cover a canvas and
+    /// to keep whatever now hangs over its edges.
+    /// </summary>
+    /// <param name="delta">How far to move the content, in document coordinates.</param>
+    /// <param name="canvas">The canvas the result must cover.</param>
+    /// <returns>A new cel with the same identity, a new buffer and a new offset.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is the only way a cel's geometry ever changes, and it is used both by the move tool
+    /// and by a canvas resize — which are the same operation seen from opposite sides, one
+    /// moving the artwork under a fixed canvas and the other moving the canvas around fixed
+    /// artwork.
+    /// </para>
+    /// <para>
+    /// <b>Nothing painted is discarded, and nothing blank is kept.</b> The new buffer covers the
+    /// canvas union whatever part of this one actually holds pixels, so trimming empty margins
+    /// is free and trimming artwork merely hides it. That is what lets an artist crop too far
+    /// and drag the frame back out again.
+    /// </para>
+    /// <para>
+    /// A new cel rather than a resized one, because <see cref="Pixels"/> is documented as never
+    /// changing for the life of a cel: a stroke in progress keeps writing into a buffer that is
+    /// simply no longer in the document, and its session rolls that back harmlessly.
+    /// </para>
+    /// </remarks>
+    public Cel CreateMoved(ImagePoint delta, ImageRect canvas)
+    {
+        ImagePoint origin = new(Offset.X + delta.X, Offset.Y + delta.Y);
+        ImageRect occupied = Pixels.GetOccupiedBounds();
+
+        ImageRect target = occupied.IsEmpty
+            ? canvas
+            : canvas.Union(occupied.Translate(origin.X, origin.Y));
+
+        PixelBuffer moved = new(target.Size);
+        Pixels.CopyRegionTo(Pixels.Bounds, moved, new ImagePoint(origin.X - target.X, origin.Y - target.Y));
+
+        return new Cel(LayerId, FrameId, moved)
+        {
+            Offset = new ImagePoint(target.X, target.Y),
+            Opacity = Opacity,
+        };
+    }
 
     /// <summary>
     /// Creates a copy of this cel's content under a different layer and frame identity.

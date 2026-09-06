@@ -126,7 +126,13 @@ public sealed partial class ToolboxViewModel : ViewModelBase
     /// Gets a value indicating whether the active tool has any settings at all. The panel
     /// says so plainly rather than opening empty, which reads as a bug.
     /// </summary>
-    public bool HasToolOptions => (SelectedTool?.Options ?? ToolOptions.None) != ToolOptions.None;
+    /// <remarks>
+    /// <see cref="ToolOptions.Selection"/> does not count. It describes how the tool reads the
+    /// modifier keys, which the cursor says and the panel has no control for, so a tool carrying
+    /// only that flag would open an options panel with nothing in it.
+    /// </remarks>
+    public bool HasToolOptions =>
+        ((SelectedTool?.Options ?? ToolOptions.None) & ~ToolOptions.Selection) != ToolOptions.None;
 
     /// <summary>Selects the tool bound to a single-key shortcut.</summary>
     /// <param name="key">The key that was pressed, as a one-character string.</param>

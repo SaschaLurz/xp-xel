@@ -646,11 +646,28 @@ launch nothing inside the shell has focus and an overridden `OnKeyDown` would ne
 
 ### 6.5 Marking pixels, and moving them
 
-Two tools mark: the rectangular marquee, and a pixel tool that paints the mask directly for the
-great deal of pixel art that is not a box. They share one gesture through `SelectionTools`:
-**a press that lands on marked pixels picks them up** rather than starting a new mark. Having
-marked something the next thing an artist wants is almost always to move it, and which tool did
-the marking should not change how that works.
+Three tools mark: the rectangular marquee, a pixel tool that paints the mask directly, and a wand
+that floods an area of one colour. They share their whole vocabulary through `SelectionTools`:
+
+- **A press that lands on marked pixels picks them up** rather than starting a new mark. Having
+  marked something the next thing an artist wants is almost always to move it, and which tool did
+  the marking should not change how that works.
+- **Shift adds, Control subtracts, a plain click replaces.** `SelectionEditMode` and
+  `SelectionTools.GetEditMode` are the one place those keys are read, so they cannot drift apart
+  between tools — and the canvas shows a plus or a minus beside the pointer while one is held,
+  because a modifier that changes what a click does has no other way to announce itself.
+
+Replacing on a plain click is the important default. A tool that always added would make a stray
+click permanent, with no way back except deselecting and starting over; replacing means the way
+out of a wrong mark is another click, and Shift is the explicit "and this too" that lets an artist
+pick out five pixels that are nowhere near each other.
+
+**The marching ants trace the mask, not its bounds.** `SelectionOutline.Trace` walks the mask and
+returns the runs where marked meets unmarked; the canvas caches that and redraws it as the
+selection changes. Outlining the bounding box instead would tell an artist who has marked five
+scattered pixels that a box is selected — and they would believe it, drag the box, and watch five
+pixels move. Runs are merged along each row and column, so a rectangular selection still costs
+four lines rather than four per pixel.
 
 The move itself is `SelectionTransform` either way, so Ctrl+T, a drag inside the marks and the
 canvas menu's "Move position" are three doors into one implementation.
@@ -672,7 +689,41 @@ is as small as it is because nearly every tool is a pure function of the pointer
 handed — the canvas asks whether a tool wants to be told about activation and about the two keys
 that mean yes and no.
 
-### 6.6 Text
+### 6.6 Moving a layer, and the artwork outside the canvas
+
+A cel's `Offset` had been (0, 0) for the whole of v0.1, honoured by the compositor but never
+used. The move tool is what finally uses it, and doing so changes one thing about the document
+model worth stating plainly: **a layer can hold pixels that are not on the canvas.**
+
+The rule that keeps this from spreading everywhere is that **a cel's bounds always contain the
+canvas**. Drawing tools write in document coordinates, and a tool that could write outside its
+buffer would have to grow it mid-stroke — invalidating every pixel index the undo session has
+recorded. Keeping the canvas covered at all times means only two operations ever change a cel's
+geometry, moving a layer and resizing the canvas, and both go through `Cel.CreateMoved`, which
+allocates the union of the canvas and whatever the buffer actually paints. Blank margins are
+dropped, so cropping away empty space is free; painted pixels are kept, so cropping away artwork
+merely hides it.
+
+Three consequences:
+
+- **`RasterEditSession` speaks document coordinates and converts once.** Its `SetPixel` subtracts
+  the cel's offset on the way in. Every tool was already passing document coordinates — they
+  happened to be the same thing — so none of them changed. The two places that read a buffer
+  directly, the bucket fill and the wand, convert explicitly and say so.
+- **A move replaces the cel and its undo puts the original object back.** An earlier stroke's
+  history entry holds a reference to that exact cel; history is linear, so by the time the stroke
+  is undone the move already has been. `ResizeCanvasCommand` had established this pattern.
+- **The crop tool can show what is out there.** `LayerCompositor` gained an overload that
+  composites into a buffer positioned anywhere, and `OverscanRenderTarget` uses it to flatten the
+  region outside the canvas while a crop frame is up. Nothing else may look past the document's
+  bounds — what a document *is* stops there, and every export, thumbnail and save agrees — but
+  dragging a frame outwards into a blank void would be a guess every time.
+
+Text moves twice: its glyphs are in a cel like anything else, but `TextLayer.Origin` is where the
+next re-render will put them, so moving only the pixels would leave the text to jump back the
+moment its style was touched — long after the move, which is the hardest kind of bug to trace.
+
+### 6.7 Text
 
 **The default font is built into the application**, and that is not a convenience. Every
 outline font on the machine is designed to be rendered with anti-aliasing at paragraph sizes.
@@ -702,7 +753,7 @@ kind of data whose source should look like the thing it describes. A test assert
 characters render identically, which is the one font bug — a mistyped row — that is otherwise
 invisible until an artist writes a word containing both.
 
-### 6.7 Colour
+### 6.8 Colour
 
 `ColorHarmony` and `HsvColor` live in Core rather than the UI, because suggesting the colours
 that go with a colour is arithmetic with no view concepts in it and is worth testing without a
@@ -737,7 +788,7 @@ swatch was clicked. Because it is shared it cannot bind its way to the editor vi
 is shown against a swatch, whose data context is that swatch — so the code-behind assigns it
 when the editor is pointed at something.
 
-### 6.8 View models and dialogs
+### 6.9 View models and dialogs
 
 MVVM with **CommunityToolkit.Mvvm**, chosen over ReactiveUI because its
 `[ObservableProperty]` and `[RelayCommand]` are compile-time source generators with no
@@ -748,7 +799,7 @@ Dialogs are **overlays inside the shell**, not child windows, because the browse
 child windows. One implementation therefore behaves identically everywhere. A dialog exposes
 its result as a `Task`, so calling code reads as a straight line rather than as callbacks.
 
-### 6.9 Theming
+### 6.10 Theming
 
 Every colour in the application comes from semantic tokens in `Themes/Tokens.axaml`, defined
 once per theme variant. No view names a literal colour. `IThemeService` only switches the
@@ -756,7 +807,7 @@ variant; setting it to `Default` makes Avalonia resolve the theme from the opera
 and update live when the OS setting changes. Adding a high-contrast or custom theme is a
 resource dictionary, not a code change.
 
-### 6.10 Composition
+### 6.11 Composition
 
 `AppServices` is the composition root and is the extension point for most new features. A
 new tool, format or panel is a class plus one line there. Registration order is deliberately

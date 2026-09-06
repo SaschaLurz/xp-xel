@@ -450,6 +450,13 @@ public sealed class PixelDocument : ObservableModel
     /// re-rendered, long after the resize, which is the kind of delayed surprise that is very
     /// hard to connect to its cause.
     /// </para>
+    /// <para>
+    /// <b>Cropping hides artwork rather than destroying it.</b> A cel that still holds painted
+    /// pixels outside the new canvas keeps a buffer big enough for them — see
+    /// <see cref="Cel.CreateMoved"/>. Growing the canvas again, or opening the crop tool, which
+    /// shows what is out there, brings them back. Empty margins are still dropped, so cropping
+    /// away blank space costs nothing.
+    /// </para>
     /// </remarks>
     public IReadOnlyList<Cel> Resize(ImageSize newSize, ImagePoint offset)
     {
@@ -459,20 +466,13 @@ public sealed class PixelDocument : ObservableModel
         }
 
         List<Cel> previous = [.. Cels.All];
+        ImageRect newCanvas = new(ImagePoint.Origin, newSize);
 
         foreach (Cel cel in previous)
         {
-            PixelBuffer resized = new(newSize);
-
-            // Clipped by CopyRegionTo, so pixels pushed outside the new canvas are simply
-            // dropped — which is what cropping means.
-            cel.Pixels.CopyRegionTo(cel.Pixels.Bounds, resized, new ImagePoint(offset.X, offset.Y));
-
-            Cels.Set(new Cel(cel.LayerId, cel.FrameId, resized)
-            {
-                Offset = ImagePoint.Origin,
-                Opacity = cel.Opacity,
-            });
+            // Resizing the canvas around the artwork and moving the artwork under the canvas
+            // are the same arithmetic, so they share one implementation.
+            Cels.Set(cel.CreateMoved(offset, newCanvas));
         }
 
         foreach (LayerNode node in EnumerateLayers())

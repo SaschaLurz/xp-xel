@@ -71,6 +71,34 @@ public sealed class ProjectSerializerTests
     }
 
     [Fact]
+    public void RoundTripsALayerThatHasBeenMovedPartlyOffTheCanvas()
+    {
+        PixelDocument original = new(new ImageSize(8, 8));
+        LayerNode layer = original.CreateRasterLayer("Moved");
+
+        Cel cel = original.GetOrCreateCel(layer, original.Frames[0]);
+        cel.Pixels.SetPixel(1, 1, Red);
+
+        // Four to the left: the one painted pixel goes from (1, 1) to (-3, 1), and the buffer
+        // grows leftwards to keep it, so its top-left corner ends up outside the document. The
+        // empty margin it left behind on the right is trimmed, which is why the buffer is
+        // eleven wide rather than twelve.
+        original.Cels.Set(cel.CreateMoved(new ImagePoint(-4, 0), original.Bounds));
+
+        PixelDocument reloaded = RoundTrip(original);
+        Cel restored = reloaded.Cels.Find(layer.Id, reloaded.Frames[0].Id)!;
+
+        // The promise is that nothing is lost, and a file that dropped the hidden part or
+        // forgot where the buffer sat would break it the moment the artist saved and reopened.
+        Assert.Equal(new ImagePoint(-3, 0), restored.Offset);
+        Assert.Equal(new ImageSize(11, 8), restored.Pixels.Size);
+
+        // Still at (-3, 1) in the document, which is off the left-hand edge and invisible until
+        // the canvas grows or the layer is moved back.
+        Assert.Equal(Red, restored.Pixels.GetPixel(-3 - restored.Offset.X, 1 - restored.Offset.Y));
+    }
+
+    [Fact]
     public void RoundTripsNestedGroups()
     {
         PixelDocument original = new(new ImageSize(4, 4));

@@ -82,7 +82,7 @@ public sealed class SelectionToolTests
     }
 
     [Fact]
-    public void ThePixelToolAddsToWhatIsAlreadyMarked()
+    public void ThePixelToolStartsAgainOnAPlainClick()
     {
         Fixture fixture = new();
         PixelSelectTool tool = new();
@@ -93,14 +93,63 @@ public sealed class SelectionToolTests
         fixture.Press(tool, 9, 9);
         fixture.Release(tool, 9, 9);
 
-        // A selection built pixel by pixel is built over several strokes; replacing on each
-        // one would make that impossible.
-        Assert.True(fixture.Workspace.Selection!.IsSelected(2, 2));
+        // Replacing is what makes a stray click cost nothing: the way out of a wrong mark is
+        // to click somewhere else, not to deselect and start over.
+        Assert.False(fixture.Workspace.Selection!.IsSelected(2, 2));
         Assert.True(fixture.Workspace.Selection!.IsSelected(9, 9));
     }
 
     [Fact]
-    public void HoldingAltUnmarksAndTheBoundsShrinkBackWithIt()
+    public void ShiftAddsPixelsThatAreNowhereNearEachOther()
+    {
+        Fixture fixture = new();
+        PixelSelectTool tool = new();
+
+        fixture.Press(tool, 2, 2);
+        fixture.Release(tool, 2, 2);
+
+        fixture.Press(tool, 9, 9, shift: true);
+        fixture.Release(tool, 9, 9, shift: true);
+
+        fixture.Press(tool, 4, 12, shift: true);
+        fixture.Release(tool, 4, 12, shift: true);
+
+        // Three separate pixels, none of them touching: the case a marquee cannot express at
+        // all and the reason this tool exists.
+        Assert.True(fixture.Workspace.Selection!.IsSelected(2, 2));
+        Assert.True(fixture.Workspace.Selection!.IsSelected(9, 9));
+        Assert.True(fixture.Workspace.Selection!.IsSelected(4, 12));
+        Assert.False(fixture.Workspace.Selection!.IsSelected(5, 5));
+    }
+
+    [Fact]
+    public void ScatteredPixelsMoveOnTheirOwnAndLeaveTheirNeighboursAlone()
+    {
+        Fixture fixture = new();
+        PixelSelectTool tool = new();
+
+        fixture.Fill(new ImageRect(0, 0, 16, 16), Red);
+
+        fixture.Press(tool, 2, 2);
+        fixture.Release(tool, 2, 2);
+        fixture.Press(tool, 9, 9, shift: true);
+        fixture.Release(tool, 9, 9, shift: true);
+
+        Assert.True(fixture.Workspace.BeginTransform());
+        fixture.Workspace.ActiveTransform!.MoveBy(0, 2);
+        fixture.Workspace.CommitTransform();
+
+        // Only the two marked pixels moved. Everything between them, inside the same bounding
+        // box, is untouched — which is the whole point of marking pixels rather than a box.
+        Assert.True(fixture.Pixels.GetPixel(2, 2).IsTransparent);
+        Assert.True(fixture.Pixels.GetPixel(9, 9).IsTransparent);
+        Assert.Equal(Red, fixture.Pixels.GetPixel(2, 4));
+        Assert.Equal(Red, fixture.Pixels.GetPixel(9, 11));
+        Assert.Equal(Red, fixture.Pixels.GetPixel(5, 5));
+    }
+
+    [Fact]
+    public void HoldingControlUnmarksAndTheBoundsShrinkBackWithIt()
     {
         Fixture fixture = new();
         PixelSelectTool tool = new();
@@ -109,9 +158,9 @@ public sealed class SelectionToolTests
         fixture.Move(tool, 8, 4);
         fixture.Release(tool, 8, 4);
 
-        fixture.Press(tool, 8, 4, alt: true);
-        fixture.Move(tool, 6, 4, alt: true);
-        fixture.Release(tool, 6, 4, alt: true);
+        fixture.Press(tool, 8, 4, control: true);
+        fixture.Move(tool, 6, 4, control: true);
+        fixture.Release(tool, 6, 4, control: true);
 
         SelectionMask mask = fixture.Workspace.Selection!;
 
@@ -132,8 +181,8 @@ public sealed class SelectionToolTests
         fixture.Press(tool, 5, 5);
         fixture.Release(tool, 5, 5);
 
-        fixture.Press(tool, 5, 5, alt: true);
-        fixture.Release(tool, 5, 5, alt: true);
+        fixture.Press(tool, 5, 5, control: true);
+        fixture.Release(tool, 5, 5, control: true);
 
         // An empty mask clips every drawing tool to nothing, which looks exactly like the
         // editor having stopped working.
@@ -167,7 +216,7 @@ public sealed class SelectionToolTests
 
         tool.OnActivated(fixture.Context);
 
-        Assert.Equal(fixture.Document.Bounds, fixture.Context.Overlay.Marquee);
+        Assert.Equal(fixture.Document.Bounds, fixture.Context.Overlay.CropFrame);
     }
 
     [Fact]
@@ -240,10 +289,10 @@ public sealed class SelectionToolTests
         fixture.Move(tool, 30, 8);
         fixture.Release(tool, 30, 8);
 
-        Assert.NotEqual(fixture.Document.Bounds, fixture.Context.Overlay.Marquee);
+        Assert.NotEqual(fixture.Document.Bounds, fixture.Context.Overlay.CropFrame);
 
         Assert.True(tool.OnKeyDown(fixture.Context, ToolKey.Escape));
-        Assert.Equal(fixture.Document.Bounds, fixture.Context.Overlay.Marquee);
+        Assert.Equal(fixture.Document.Bounds, fixture.Context.Overlay.CropFrame);
         Assert.Equal(0, fixture.Workspace.History.Count);
     }
 
@@ -257,7 +306,7 @@ public sealed class SelectionToolTests
         tool.OnDeactivated(fixture.Context);
 
         // A frame left behind would be drawn over artwork the next tool is being used on.
-        Assert.Null(fixture.Context.Overlay.Marquee);
+        Assert.Null(fixture.Context.Overlay.CropFrame);
     }
 
     /// <summary>A 16x16 document with one raster layer.</summary>
@@ -302,18 +351,30 @@ public sealed class SelectionToolTests
             }
         }
 
-        public void Press(ITool tool, int x, int y, bool alt = false) =>
-            tool.OnPointerPressed(Context, Args(x, y, alt));
+        public void Press(ITool tool, int x, int y, bool shift = false, bool control = false) =>
+            tool.OnPointerPressed(Context, Args(x, y, shift, control));
 
-        public void Move(ITool tool, int x, int y, bool alt = false) =>
-            tool.OnPointerMoved(Context, Args(x, y, alt));
+        public void Move(ITool tool, int x, int y, bool shift = false, bool control = false) =>
+            tool.OnPointerMoved(Context, Args(x, y, shift, control));
 
-        public void Release(ITool tool, int x, int y, bool alt = false) =>
-            tool.OnPointerReleased(Context, Args(x, y, alt));
+        public void Release(ITool tool, int x, int y, bool shift = false, bool control = false) =>
+            tool.OnPointerReleased(Context, Args(x, y, shift, control));
 
-        private static ToolPointerEventArgs Args(int x, int y, bool alt) => new(
-            new ImagePoint(x, y),
-            ToolPointerButton.Left,
-            alt ? ToolModifiers.Alt : ToolModifiers.None);
+        private static ToolPointerEventArgs Args(int x, int y, bool shift, bool control)
+        {
+            ToolModifiers modifiers = ToolModifiers.None;
+
+            if (shift)
+            {
+                modifiers |= ToolModifiers.Shift;
+            }
+
+            if (control)
+            {
+                modifiers |= ToolModifiers.Control;
+            }
+
+            return new ToolPointerEventArgs(new ImagePoint(x, y), ToolPointerButton.Left, modifiers);
+        }
     }
 }

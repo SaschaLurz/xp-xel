@@ -12,18 +12,22 @@ namespace XPXel.Core.Tools;
 /// <b>What it is for.</b> The rectangular marquee can only ever say "this box". A great deal of
 /// pixel art is not a box — an arm, a highlight, three stray pixels that ended up a shade wrong
 /// — and marking those meant, until now, drawing several boxes and hoping. This paints the
-/// selection directly, at whatever brush size is set.
+/// selection directly, at whatever brush size is set, and the pixels it marks need not touch
+/// each other.
 /// </para>
 /// <para>
-/// <b>It adds rather than replaces.</b> Every press extends the mark, because a selection built
-/// pixel by pixel is built over several strokes and starting again on each one would make it
-/// impossible. Alt takes pixels back out, which is the same convention the colour picker uses
-/// for "the other meaning of this gesture".
+/// <b>A plain click starts again.</b> Clicking marks that one pixel and unmarks everything
+/// else, which is what makes a stray click cost nothing, and what lets an artist pick out a
+/// handful of pixels that are nowhere near each other: click the first, then Shift-click the
+/// rest. Shift adds to what is already marked and Control takes away from it, the same as on
+/// every other selection tool — see <see cref="SelectionTools.GetEditMode"/>.
 /// </para>
 /// <para>
 /// <b>Pressing on pixels it has already marked picks them up</b> — see
 /// <see cref="SelectionTools"/>. That is the same gesture the marquee has, deliberately: which
-/// tool did the marking should not change how the marked pixels are moved.
+/// tool did the marking should not change how the marked pixels are moved. Holding a modifier
+/// says "I am still marking", so adding a pixel next to one already marked never turns into an
+/// accidental drag.
 /// </para>
 /// <para>
 /// <b>Marking is not undoable</b>, for the same reason the marquee's is not: Ctrl+Z is how an
@@ -36,9 +40,10 @@ public sealed class PixelSelectTool : ITool
     /// <summary>The stable identifier of this tool.</summary>
     public const string ToolId = "xpxel.tool.select.pixel";
 
+    private SelectionMask? _mask;
+    private SelectionEditMode _mode;
     private ImagePoint _lastPoint;
     private bool _isMarking;
-    private bool _isErasing;
 
     /// <inheritdoc />
     public string Id => ToolId;
@@ -48,7 +53,7 @@ public sealed class PixelSelectTool : ITool
 
     /// <inheritdoc />
     public string Description =>
-        "Click or drag to mark individual pixels; hold Alt to unmark. Press on marked pixels to pick them up and move them.";
+        "Click or drag to mark pixels; hold Shift to add, Control to take away. Press on marked pixels to move them.";
 
     /// <inheritdoc />
     public void OnPointerPressed(ToolContext context, ToolPointerEventArgs e)
@@ -61,14 +66,17 @@ public sealed class PixelSelectTool : ITool
             return;
         }
 
-        // Pressing on what is already marked means "move this", not "mark it again".
-        if (!e.IsAltDown && SelectionTools.TryBeginMove(context, e.Position))
+        _mode = SelectionTools.GetEditMode(e);
+
+        // Pressing on what is already marked means "move this" — but only when no modifier is
+        // held, because a modifier is the artist saying they are still marking.
+        if (_mode == SelectionEditMode.Replace && SelectionTools.TryBeginMove(context, e.Position))
         {
             return;
         }
 
+        _mask = SelectionTools.GetTargetMask(context, _mode);
         _isMarking = true;
-        _isErasing = e.IsAltDown;
         _lastPoint = e.Position;
 
         Mark(context, e.Position);
@@ -103,50 +111,40 @@ public sealed class PixelSelectTool : ITool
 
         _isMarking = false;
 
-        if (context.Workspace.Selection is not { } mask)
+        if (_mask is { } mask)
         {
-            return;
+            SelectionTools.Publish(context, mask);
         }
 
-        // Unmarking can only ever have left the bounds too large, so they are recomputed once
-        // here rather than on every pixel of the drag.
-        mask.RecalculateBounds();
-
-        // An empty mask and no mask are the same thing to every tool that reads it, but only
-        // the second says so; leaving an empty one behind would clip every drawing tool to
-        // nothing, which looks exactly like the editor having stopped working.
-        if (mask.IsEmpty)
-        {
-            context.Workspace.Selection = null;
-        }
-        else
-        {
-            context.Workspace.NotifySelectionChanged();
-        }
+        _mask = null;
     }
 
     /// <inheritdoc />
-    public void Cancel(ToolContext context) => _isMarking = false;
+    public void Cancel(ToolContext context)
+    {
+        _isMarking = false;
+        _mask = null;
+    }
 
     /// <summary>Marks or unmarks the brush's footprint around one point.</summary>
     private void Mark(ToolContext context, ImagePoint point)
     {
-        SelectionMask mask = context.Workspace.Selection is { } existing && existing.Size == context.Document.Size
-            ? existing
-            : new SelectionMask(context.Document.Size);
-
-        byte coverage = _isErasing ? (byte)0 : (byte)255;
+        if (_mask is not { } mask)
+        {
+            return;
+        }
 
         BrushStamp.Stamp(
             point,
             context.Settings.BrushSize,
             BrushShape.Square,
-            (x, y) => mask.SetCoverage(x, y, coverage));
+            (x, y) => SelectionTools.SetPixel(mask, x, y, _mode));
 
+        // Published as the drag goes so the artist sees the marks appear. The bounds are put
+        // right once, on release, because subtracting is the only thing that can leave them
+        // wrong and rescanning per pixel would be absurd.
         if (ReferenceEquals(context.Workspace.Selection, mask))
         {
-            // The same mask, mutated in place. Assigning it back would raise nothing, because
-            // the property compares references.
             context.Workspace.NotifySelectionChanged();
         }
         else

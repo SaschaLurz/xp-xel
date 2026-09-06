@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using XPXel.Core.Primitives;
+using XPXel.Core.Selection;
 
 namespace XPXel.UI.Media;
 
@@ -68,6 +69,8 @@ public static class ToolCursors
 
     private static Cursor? _crosshair;
     private static Cursor? _text;
+    private static Cursor? _addToSelection;
+    private static Cursor? _subtractFromSelection;
 
     /// <summary>Returns the cursor a tool should use.</summary>
     /// <param name="presentation">How the tool is presented.</param>
@@ -88,6 +91,94 @@ public static class ToolCursors
     /// The thin crosshair used by every tool that places a pixel exactly.
     /// </summary>
     public static Cursor Crosshair => _crosshair ??= new Cursor(StandardCursorType.Cross);
+
+    /// <summary>
+    /// The crosshair a selection tool wears while Shift or Control is held, marked with the
+    /// sign of what the next click will do.
+    /// </summary>
+    /// <param name="mode">What the modifier keys currently mean.</param>
+    /// <returns>
+    /// A cached cursor, or <see langword="null"/> for <see cref="SelectionEditMode.Replace"/>,
+    /// which is the plain crosshair, and on a platform that will not make a bitmap cursor.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Cached, unlike the colour dot: there are exactly two of these and they never change, so
+    /// holding two platform cursors for the life of the application is the cheap option.
+    /// </para>
+    /// <para>
+    /// A sign beside the pointer is the only way a modifier ever announces itself. Without it the
+    /// artist has to already know that Shift adds — and someone who already knows did not need
+    /// the reminder, while someone who does not will never find out.
+    /// </para>
+    /// </remarks>
+    public static Cursor? SelectionMode(SelectionEditMode mode)
+    {
+        switch (mode)
+        {
+            case SelectionEditMode.Add:
+                return _addToSelection ??= CreateSignedCrosshair(add: true);
+
+            case SelectionEditMode.Subtract:
+                return _subtractFromSelection ??= CreateSignedCrosshair(add: false);
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>Builds a crosshair with a small plus or minus beside it.</summary>
+    private static Cursor? CreateSignedCrosshair(bool add)
+    {
+        try
+        {
+            using RenderTargetBitmap bitmap = new(new PixelSize(DottedSize, DottedSize), new Vector(96, 96));
+
+            using (DrawingContext context = bitmap.CreateDrawingContext())
+            {
+                DrawCrosshair(context);
+                DrawSign(context, add);
+            }
+
+            return new Cursor(bitmap, new PixelPoint(DottedCenter, DottedCenter));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Draws the plus or minus, up and to the right of the cross where the colour dot sits.
+    /// </summary>
+    /// <remarks>
+    /// Haloed in white the same way the cross is, so it stays legible over dark artwork; the two
+    /// can never appear together, because no tool both draws with a colour and marks pixels.
+    /// </remarks>
+    private static void DrawSign(DrawingContext context, bool add)
+    {
+        const double arm = 3.0;
+        Point middle = new(DottedCenter + 12.5, DottedCenter - 10.5);
+
+        StreamGeometry geometry = new();
+
+        using (StreamGeometryContext path = geometry.Open())
+        {
+            path.BeginFigure(new Point(middle.X - arm, middle.Y), isFilled: false);
+            path.LineTo(new Point(middle.X + arm, middle.Y));
+            path.EndFigure(isClosed: false);
+
+            if (add)
+            {
+                path.BeginFigure(new Point(middle.X, middle.Y - arm), isFilled: false);
+                path.LineTo(new Point(middle.X, middle.Y + arm));
+                path.EndFigure(isClosed: false);
+            }
+        }
+
+        context.DrawGeometry(null, new Pen(Brushes.White, 3.5), geometry);
+        context.DrawGeometry(null, new Pen(Brushes.Black, 1.5), geometry);
+    }
 
     /// <summary>
     /// Builds a crosshair carrying a round dot of the colour the tool is about to lay down.

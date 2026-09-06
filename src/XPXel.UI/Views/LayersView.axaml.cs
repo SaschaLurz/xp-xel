@@ -106,6 +106,23 @@ public partial class LayersView : UserControl
         _pressOrigin = e.GetPosition(this);
         _pressArgs = e;
 
+        // Ctrl-clicking a preview marks everything on that layer. It is on the preview rather
+        // than the whole row because the preview is the picture of the layer's contents, which
+        // is exactly what the gesture selects — and because a modified click anywhere on a row
+        // of a list already means "extend the selection" to every hand that uses a computer.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control)
+            && _pressedRow is { } row
+            && Model is { } model
+            && IsInsideThumbnail(e.Source as Visual))
+        {
+            model.SelectLayerPixels(row);
+
+            _pressedRow = null;
+            _pressArgs = null;
+            e.Handled = true;
+            return;
+        }
+
         // A double-click on the name starts a rename. This is checked here rather than with
         // a DoubleTapped handler on the TextBlock because the ListBox consumes the second
         // tap to extend selection before it reaches the row's own template.
@@ -304,6 +321,29 @@ public partial class LayersView : UserControl
         Button button = this.GetControl<Button>(name);
         Point local = e.GetPosition(button);
         return local.X >= 0 && local.Y >= 0 && local.X < button.Bounds.Width && local.Y < button.Bounds.Height;
+    }
+
+    /// <summary>Tests whether a hit-tested visual is inside a row's preview image.</summary>
+    /// <remarks>
+    /// The preview is found by its tag rather than by its name: a name inside a data template
+    /// belongs to every row at once, so it cannot identify one.
+    /// </remarks>
+    private static bool IsInsideThumbnail(Visual? source)
+    {
+        for (Visual? visual = source; visual is not null; visual = visual.GetVisualParent())
+        {
+            if (visual is Border { Tag: "thumbnail" })
+            {
+                return true;
+            }
+
+            if (visual is ListBoxItem)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Walks up from a hit-tested visual to the row view model it belongs to.</summary>

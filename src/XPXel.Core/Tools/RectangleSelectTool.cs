@@ -25,6 +25,12 @@ namespace XPXel.Core.Tools;
 /// next thing an artist wants is almost always to move it; see <see cref="SelectionTools"/>.
 /// </para>
 /// <para>
+/// <b>Shift adds and Control takes away</b>, as on every other selection tool — see
+/// <see cref="SelectionTools.GetEditMode"/>. Constraining the drag to a square therefore moved
+/// to Alt: modifiers that mean the same thing on every selection tool are worth more than one
+/// tool's private shortcut, and a square marquee is still one key away.
+/// </para>
+/// <para>
 /// <b>Selecting is not undoable.</b> Ctrl+Z is how an artist takes back a mark they made on
 /// the artwork, and spending it on a selection would mean pressing it twice to reach the
 /// stroke they actually meant. Select All, Deselect and Invert in the Select menu are the
@@ -37,6 +43,7 @@ public sealed class RectangleSelectTool : ITool
     public const string ToolId = "xpxel.tool.select.rectangle";
 
     private ImagePoint _anchor;
+    private SelectionEditMode _mode;
     private bool _isDragging;
 
     /// <inheritdoc />
@@ -47,7 +54,7 @@ public sealed class RectangleSelectTool : ITool
 
     /// <inheritdoc />
     public string Description =>
-        "Drag to select a rectangle; drawing is then limited to it. Click once to deselect. Hold Shift for a square.";
+        "Drag to select a rectangle; Shift adds to the selection, Control takes away, Alt keeps it square. Click once to deselect.";
 
     /// <inheritdoc />
     public void OnPointerPressed(ToolContext context, ToolPointerEventArgs e)
@@ -60,10 +67,13 @@ public sealed class RectangleSelectTool : ITool
             return;
         }
 
+        _mode = SelectionTools.GetEditMode(e);
+
         // Pressing on pixels that are already marked means "move these", not "start again".
         // Shared with the pixel select tool, because which tool did the marking should not
-        // change how the marked pixels are picked up.
-        if (SelectionTools.TryBeginMove(context, e.Position))
+        // change how the marked pixels are picked up. A modifier says the artist is still
+        // marking, so it suppresses the pick-up.
+        if (_mode == SelectionEditMode.Replace && SelectionTools.TryBeginMove(context, e.Position))
         {
             return;
         }
@@ -104,10 +114,25 @@ public sealed class RectangleSelectTool : ITool
         ImageRect region = BuildRect(context, e);
 
         // A single pixel means the artist clicked rather than dragged, which is the gesture
-        // for "get this selection out of my way".
-        context.Workspace.Selection = region.Width <= 1 && region.Height <= 1
-            ? null
-            : SelectionMask.FromRect(context.Document.Size, region);
+        // for "get this selection out of my way" — but only when replacing. Shift-clicking one
+        // pixel is a request to add that pixel, and must not throw the rest away.
+        if (region.Width <= 1 && region.Height <= 1 && _mode == SelectionEditMode.Replace)
+        {
+            context.Workspace.Selection = null;
+            return;
+        }
+
+        SelectionMask mask = SelectionTools.GetTargetMask(context, _mode);
+
+        for (int y = region.Top; y < region.Bottom; y++)
+        {
+            for (int x = region.Left; x < region.Right; x++)
+            {
+                SelectionTools.SetPixel(mask, x, y, _mode);
+            }
+        }
+
+        SelectionTools.Publish(context, mask);
     }
 
     /// <inheritdoc />
@@ -123,7 +148,7 @@ public sealed class RectangleSelectTool : ITool
 
     private ImageRect BuildRect(ToolContext context, ToolPointerEventArgs e)
     {
-        ImagePoint corner = e.IsShiftDown
+        ImagePoint corner = e.IsAltDown
             ? ShapeRasterizer.ConstrainToSquare(_anchor, e.Position)
             : e.Position;
 

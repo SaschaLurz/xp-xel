@@ -457,6 +457,28 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         Layers.Clear();
     }
 
+    /// <summary>
+    /// Marks every pixel one layer paints, which is what Ctrl-clicking its preview does.
+    /// </summary>
+    /// <param name="row">The row whose layer should be marked.</param>
+    /// <remarks>
+    /// The layer is made active first. Marking pixels the artist then cannot move — because the
+    /// selection came from one layer and the active layer is another — would be a trap, and the
+    /// click plainly says which layer is meant.
+    /// </remarks>
+    public void SelectLayerPixels(LayerItemViewModel row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        if (_workspace is not { } workspace)
+        {
+            return;
+        }
+
+        SelectedLayer = row;
+        workspace.SelectLayerPixels(row.Layer);
+    }
+
     private void SelectLayer(LayerNode layer) =>
         SelectedLayer = Layers.FirstOrDefault(row => row.Layer == layer) ?? SelectedLayer;
 

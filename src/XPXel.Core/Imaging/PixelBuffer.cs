@@ -248,6 +248,48 @@ public sealed class PixelBuffer
         }
     }
 
+    /// <summary>
+    /// Returns the smallest rectangle containing every pixel that is not fully transparent,
+    /// or <see cref="ImageRect.Empty"/> when the buffer holds nothing at all.
+    /// </summary>
+    /// <returns>The occupied rectangle, in this buffer's own coordinates.</returns>
+    /// <remarks>
+    /// This is what lets a buffer be trimmed. A layer that has been moved keeps a buffer larger
+    /// than the canvas so that whatever hangs over the edge is not lost; without a way to ask
+    /// how much of it is actually used, that buffer could only ever grow.
+    /// </remarks>
+    public ImageRect GetOccupiedBounds()
+    {
+        int left = int.MaxValue;
+        int top = int.MaxValue;
+        int right = int.MinValue;
+        int bottom = int.MinValue;
+
+        for (int y = 0; y < Height; y++)
+        {
+            ReadOnlySpan<byte> row = GetReadOnlyRowSpan(y);
+
+            for (int x = 0; x < Width; x++)
+            {
+                // Alpha is the last of the four channels, and zero alpha is nothing to keep
+                // whatever the other three happen to say.
+                if (row[(x * BytesPerPixel) + 3] == 0)
+                {
+                    continue;
+                }
+
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x + 1);
+                bottom = Math.Max(bottom, y + 1);
+            }
+        }
+
+        return right > left && bottom > top
+            ? ImageRect.FromEdges(left, top, right, bottom)
+            : ImageRect.Empty;
+    }
+
     /// <summary>Creates an independent copy of this buffer.</summary>
     /// <returns>A new buffer with identical dimensions and contents.</returns>
     public PixelBuffer Clone() => new(Size, (byte[])_pixels.Clone());

@@ -39,7 +39,7 @@ public sealed class CanvasResizeTests
     }
 
     [Fact]
-    public void CroppingTheCanvasDropsThePixelsThatFallOutside()
+    public void CroppingTheCanvasHidesThePixelsThatFallOutsideRatherThanDestroyingThem()
     {
         (PixelDocument document, LayerNode layer) = CreateDocument(8);
         PixelBufferSetter(document, layer, 1, 1, Red);
@@ -47,13 +47,46 @@ public sealed class CanvasResizeTests
 
         document.Resize(new ImageSize(4, 4), ImagePoint.Origin);
 
+        Assert.Equal(new ImageSize(4, 4), document.Size);
+
+        // The canvas stops at 3,3 but the blue pixel at 6,6 is still on the layer: the cel
+        // keeps a buffer wide enough to hold it. Cropping hides artwork, the way a slide
+        // editor hides a shape dragged off the slide, so trimming too far is recoverable.
+        Cel cel = document.Cels.Find(layer.Id, document.Frames[0].Id)!;
+        Assert.Equal(Red, cel.Pixels.GetPixel(1, 1));
+        Assert.Equal(Blue, cel.Pixels.GetPixel(6, 6));
+    }
+
+    [Fact]
+    public void GrowingTheCanvasBackShowsWhatTheCropHid()
+    {
+        (PixelDocument document, LayerNode layer) = CreateDocument(8);
+        PixelBufferSetter(document, layer, 6, 6, Blue);
+
+        document.Resize(new ImageSize(4, 4), ImagePoint.Origin);
+        document.Resize(new ImageSize(8, 8), ImagePoint.Origin);
+
+        // Not an undo: two separate crops, the second of them outwards. This is what dragging
+        // the crop frame back out has to do.
+        Cel cel = document.Cels.Find(layer.Id, document.Frames[0].Id)!;
+        Assert.Equal(Blue, cel.Pixels.GetPixel(6 - cel.Offset.X, 6 - cel.Offset.Y));
+        Assert.True(cel.Bounds.Contains(document.Bounds));
+    }
+
+    [Fact]
+    public void CroppingAwayEmptySpaceStillShrinksTheBuffer()
+    {
+        (PixelDocument document, LayerNode layer) = CreateDocument(8);
+        PixelBufferSetter(document, layer, 1, 1, Red);
+
+        document.Resize(new ImageSize(4, 4), ImagePoint.Origin);
+
+        // Only painted pixels are worth remembering. The right-hand half of this layer held
+        // nothing, so cropping it away costs nothing — which is the common case, and the
+        // reason keeping artwork can afford to be expensive.
         Cel cel = document.Cels.Find(layer.Id, document.Frames[0].Id)!;
         Assert.Equal(new ImageSize(4, 4), cel.Pixels.Size);
-        Assert.Equal(Red, cel.Pixels.GetPixel(1, 1));
-
-        // The blue pixel was at 6,6 and the canvas now stops at 3,3 — cropping means those
-        // pixels are gone, which is exactly why undo has to store them rather than recompute.
-        Assert.Equal(new ImageSize(4, 4), document.Size);
+        Assert.Equal(ImagePoint.Origin, cel.Offset);
     }
 
     [Fact]

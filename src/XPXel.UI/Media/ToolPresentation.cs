@@ -43,6 +43,14 @@ public enum ToolOptions
     /// chooser has to disappear for it too.
     /// </summary>
     Pencil = 32,
+
+    /// <summary>
+    /// The tool marks pixels, and so reads Shift as "add to the selection" and Control as "take
+    /// away from it". The canvas shows a plus or a minus beside the pointer while one of those
+    /// is held — a modifier that changes what a click does is worth saying out loud, because
+    /// otherwise the only way to discover it is to have been told.
+    /// </summary>
+    Selection = 64,
 }
 
 /// <summary>How a tool's pointer should look while that tool is active.</summary>
@@ -163,11 +171,21 @@ public static class ToolPresentations
                     Options: ToolOptions.Text, ShowsColorSwatch: true),
 
             [RectangleSelectTool.ToolId] =
-                new(ToolIcons.Marquee, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "M"),
+                new(ToolIcons.Marquee, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "M",
+                    Options: ToolOptions.Selection),
 
             [PixelSelectTool.ToolId] =
                 new(ToolIcons.PixelSelect, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true,
-                    Shortcut: "K", Options: ToolOptions.Pencil),
+                    Shortcut: "K", Options: ToolOptions.Pencil | ToolOptions.Selection),
+
+            // The wand asks the same two questions the bucket does — how close a colour counts,
+            // and whether the area has to be joined up — so it shows the same options.
+            [MagicWandTool.ToolId] =
+                new(ToolIcons.MagicWand, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false,
+                    Shortcut: "W", Options: ToolOptions.Fill | ToolOptions.Selection),
+
+            [MoveTool.ToolId] =
+                new(ToolIcons.Move, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "V"),
 
             [CropTool.ToolId] =
                 new(ToolIcons.Crop, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "C"),

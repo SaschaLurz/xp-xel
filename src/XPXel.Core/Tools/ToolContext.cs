@@ -81,6 +81,24 @@ public sealed class ToolContext
     /// </remarks>
     public Func<int, int, PixelColor>? CompositeSampler { get; set; }
 
+    /// <summary>
+    /// How many screen pixels one image pixel currently occupies — the canvas's zoom.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Almost nothing needs this, and nothing that draws may use it: a tool whose output changed
+    /// with the zoom would produce different artwork depending on how closely the artist happened
+    /// to be looking. It is here for the one thing that genuinely is a screen measurement — how
+    /// near the pointer has to be to something before it counts as grabbing it. Six screen pixels
+    /// is a fingertip at any zoom; six image pixels is most of a sprite.
+    /// </para>
+    /// <para>
+    /// Defaults to 1, which is what a headless test or an unattached tool gets, and means image
+    /// pixels and screen pixels are the same thing.
+    /// </para>
+    /// </remarks>
+    public double ViewScale { get; set; } = 1.0;
+
     /// <summary>Gets a value indicating whether a drawing tool may currently make an edit.</summary>
     public bool CanEdit => Workspace.CanEditActiveLayer;
 

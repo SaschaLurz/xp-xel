@@ -121,7 +121,7 @@ public sealed class SelectionTransform
                 }
 
                 covered[index] = true;
-                lifted[index] = cel.Pixels.GetPixelOrTransparent(sx, sy);
+                lifted[index] = cel.Pixels.GetPixelOrTransparent(sx - cel.Offset.X, sy - cel.Offset.Y);
                 any = true;
             }
         }

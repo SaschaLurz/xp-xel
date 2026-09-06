@@ -22,16 +22,31 @@ namespace XPXel.Core.Tools;
 /// separate resize of the document. Escape puts the frame back around the whole picture.
 /// </para>
 /// <para>
-/// <b>What it does not do is add handles to the canvas.</b> The edges of the frame are the
-/// handles: pressing near one drags it, pressing well inside moves the whole frame, and
-/// pressing outside starts a fresh frame from that corner. That is three gestures with nothing
-/// to draw and nothing to hit at low zoom, where an eight-pixel handle would be invisible.
+/// <b>The grips are measured on screen, not on the canvas.</b> How close the pointer must come
+/// to an edge before it takes hold of it is a question about fingers and mice, so the tolerance
+/// is a fixed number of screen pixels converted through <see cref="ToolContext.ViewScale"/>.
+/// A tolerance in image pixels would be an invisible sliver at 32× and would swallow a whole
+/// 16-pixel sprite at 1:1 — which is exactly the complaint that "you cannot grab anything".
+/// </para>
+/// <para>
+/// <b>The frame is always whole pixels</b>, because it is measured in them: every coordinate
+/// here is an <see cref="int"/>, so an edge cannot come to rest halfway through a pixel and the
+/// resulting canvas cannot have a fractional size.
 /// </para>
 /// </remarks>
 public sealed class CropTool : ITool, IInteractiveTool
 {
     /// <summary>The stable identifier of this tool.</summary>
     public const string ToolId = "xpxel.tool.crop";
+
+    /// <summary>
+    /// How near an edge the pointer counts as grabbing it, in screen pixels.
+    /// </summary>
+    /// <remarks>
+    /// Matched to the size the canvas draws its handles, so that everything that looks grabbable
+    /// is grabbable and nothing else is.
+    /// </remarks>
+    public const double GripScreenDistance = 7.0;
 
     /// <summary>Which part of the frame a drag is moving.</summary>
     [Flags]
@@ -59,7 +74,7 @@ public sealed class CropTool : ITool, IInteractiveTool
 
     /// <inheritdoc />
     public string Description =>
-        "Drag the frame's edges to trim the picture or to make it bigger, then press Enter. Escape puts the frame back.";
+        "Drag the frame's handles to trim the picture or to make it bigger, then press Enter. Escape puts the frame back.";
 
     /// <inheritdoc />
     public void OnActivated(ToolContext context)
@@ -68,7 +83,7 @@ public sealed class CropTool : ITool, IInteractiveTool
 
         _frame = context.Document.Bounds;
         _isDragging = false;
-        context.Overlay.Marquee = _frame;
+        context.Overlay.CropFrame = _frame;
     }
 
     /// <inheritdoc />
@@ -78,7 +93,7 @@ public sealed class CropTool : ITool, IInteractiveTool
 
         if (context is not null)
         {
-            context.Overlay.Marquee = null;
+            context.Overlay.CropFrame = null;
         }
     }
 
@@ -118,7 +133,7 @@ public sealed class CropTool : ITool, IInteractiveTool
             _frame = context.Document.Bounds;
         }
 
-        _grip = GetGrip(e.Position);
+        _grip = GetGrip(e.Position, GetTolerance(context));
         _anchor = e.Position;
         _dragStart = _frame;
         _isDragging = true;
@@ -131,7 +146,7 @@ public sealed class CropTool : ITool, IInteractiveTool
             _grip = Grip.Right | Grip.Bottom;
         }
 
-        context.Overlay.Marquee = _frame;
+        context.Overlay.CropFrame = _frame;
     }
 
     /// <inheritdoc />
@@ -152,7 +167,7 @@ public sealed class CropTool : ITool, IInteractiveTool
             ? _dragStart.Translate(dx, dy)
             : Resize(_dragStart, _grip, dx, dy);
 
-        context.Overlay.Marquee = _frame;
+        context.Overlay.CropFrame = _frame;
     }
 
     /// <inheritdoc />
@@ -161,7 +176,7 @@ public sealed class CropTool : ITool, IInteractiveTool
         ArgumentNullException.ThrowIfNull(context);
 
         _isDragging = false;
-        context.Overlay.Marquee = _frame;
+        context.Overlay.CropFrame = _frame;
     }
 
     /// <inheritdoc />
@@ -196,15 +211,19 @@ public sealed class CropTool : ITool, IInteractiveTool
         OnActivated(context);
     }
 
-    /// <summary>Works out what a press at a point is asking to drag.</summary>
+    /// <summary>
+    /// How far from an edge a press still counts as grabbing it, in image pixels.
+    /// </summary>
     /// <remarks>
-    /// The tolerance grows with the frame but is capped, so the edges stay catchable on a
-    /// 16-pixel sprite without swallowing the whole middle of a 512-pixel background.
+    /// At least one pixel, so the frame is grabbable when zoomed so far out that a whole pixel is
+    /// smaller than a fingertip — at that zoom the artist cannot aim at a pixel anyway.
     /// </remarks>
-    private Grip GetGrip(ImagePoint point)
-    {
-        int tolerance = Math.Clamp(Math.Min(_frame.Width, _frame.Height) / 8, 1, 6);
+    private static int GetTolerance(ToolContext context) =>
+        Math.Max(1, (int)Math.Round(GripScreenDistance / Math.Max(context.ViewScale, 0.01)));
 
+    /// <summary>Works out what a press at a point is asking to drag.</summary>
+    private Grip GetGrip(ImagePoint point, int tolerance)
+    {
         bool nearLeft = Math.Abs(point.X - _frame.Left) <= tolerance;
         bool nearRight = Math.Abs(point.X - _frame.Right) <= tolerance;
         bool nearTop = Math.Abs(point.Y - _frame.Top) <= tolerance;

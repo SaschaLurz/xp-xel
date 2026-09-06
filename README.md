@@ -61,9 +61,17 @@ from a single codebase.
   pixel under the pointer, and **rulers** down the top and left edges numbered from 1, with
   the pointer's own coordinate in the status bar.
 - **Canvas size, both ways.** **Image → Canvas Size** crops a 32×32 down to 16×32 or grows it
-  to 64×64, with a nine-way anchor deciding which part of the artwork keeps its place; the
-  pixels a crop throws away come back on undo. **Crop to Selection** does the same from a
-  marquee.
+  to 64×64, with a nine-way anchor deciding which part of the artwork keeps its place. **Crop to
+  Selection** does the same from a marquee, and the **crop tool** (`C`) puts a frame with handles
+  around the picture that drags in to trim or out to enlarge.
+- **Nothing falls off the edge.** Move a layer with `V` and whatever leaves the canvas is kept,
+  hidden rather than cut, exactly as a shape dragged half off a slide stays on the slide. Drag it
+  back, grow the canvas, or open the crop tool — which shows you what is out there — and it
+  returns.
+- **Selections that are not boxes.** The pixel tool (`K`) marks pixels one at a time, however far
+  apart, and the wand (`W`) marks a whole area of one colour. `Shift` adds and `Ctrl` takes away
+  on every selection tool, the marching ants trace the actual edge rather than a bounding box, and
+  `Ctrl`-clicking a layer's preview marks everything that layer paints.
 - **Colour**: a spectrum picker — a saturation-and-value square beside a hue strip, the
   layout every image editor uses — plus a palette whose first ten swatches are a **hotbar** — they carry the numbers
   1–9 and 0, and those keys pick them, so the colour you want is one keystroke away. Right-
@@ -125,9 +133,12 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Bucket fill / colour picker | `G` / `I` |
 | Line / rectangle / ellipse | `L` / `R` / `O` |
 | Text / rectangular marquee | `T` / `M` |
-| Crop | `C`, drag the frame's edges, then `Enter` |
-| Mark individual pixels | `K`, then click or drag; hold `Alt` to unmark |
+| Mark individual pixels / magic wand | `K` / `W` |
+| Add to a selection / take away from it | Hold `Shift` / hold `Ctrl`, on any selection tool |
+| Mark everything on a layer | `Ctrl`-click its preview in the layers panel |
 | Move what you have marked | Press inside it and drag, or `Ctrl` `T`, or right-click it |
+| Move a whole layer | `V`, then drag |
+| Crop | `C`, drag the frame's handles, then `Enter` |
 | Draw | Left mouse button |
 | Open the active tool's settings | Right-click the canvas |
 | Pan the canvas | Hold `Space` and drag, or middle mouse button drag |

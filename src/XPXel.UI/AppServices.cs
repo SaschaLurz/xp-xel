@@ -87,6 +87,8 @@ public static class AppServices
         services.AddSingleton<ITool, TextTool>();
         services.AddSingleton<ITool, RectangleSelectTool>();
         services.AddSingleton<ITool, PixelSelectTool>();
+        services.AddSingleton<ITool, MagicWandTool>();
+        services.AddSingleton<ITool, MoveTool>();
         services.AddSingleton<ITool, CropTool>();
 
         services.AddSingleton<ToolRegistry>();

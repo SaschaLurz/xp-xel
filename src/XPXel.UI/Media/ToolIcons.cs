@@ -66,14 +66,23 @@ public static class ToolIcons
         "M3 8 L3 5 L6 5 M10 5 L14 5 M18 5 L21 5 L21 8 M21 12 L21 14 " +
         "M21 18 L21 21 L18 21 M14 21 L10 21 M6 21 L3 21 L3 18 M3 14 L3 12";
 
-    /// <summary>A question mark, shown for a tool with no icon of its own.</summary>
     /// <summary>A pixel wand: a marked square with a pointer at it.</summary>
     public const string PixelSelect =
         "M3 3 L9 3 L9 9 L3 9 Z M13 4 L20 11 L16 12 L18 17 L16 18 L14 13 L11 15 Z";
 
+    /// <summary>A wand with a spark at its tip, for the tool that selects a whole area.</summary>
+    public const string MagicWand =
+        "M4 20 L14 10 L17 13 L7 21 Z M17 3 L17 8 M14.5 5.5 L19.5 5.5 M20 10 L22 10 M12 3 L12 5";
+
+    /// <summary>A four-way arrow, the universal mark for "drag this".</summary>
+    public const string Move =
+        "M12 3 L12 21 M3 12 L21 12 M12 3 L9 6 M12 3 L15 6 M12 21 L9 18 M12 21 L15 18 " +
+        "M3 12 L6 9 M3 12 L6 15 M21 12 L18 9 M21 12 L18 15";
+
     /// <summary>A crop frame: two overlapping corner brackets, the printer's mark for it.</summary>
     public const string Crop = "M7 2 L7 17 L22 17 M2 7 L17 7 L17 22";
 
+    /// <summary>A question mark, shown for a tool with no icon of its own.</summary>
     public const string Unknown =
         "M9 8 A3 3 0 1 1 12 12 L12 15 M12 19 L12 19.01";
 

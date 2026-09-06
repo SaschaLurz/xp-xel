@@ -64,19 +64,24 @@ public sealed class BucketFillTool : ITool
 
         PixelColor color = context.GetColorForButton(e.Button);
 
+        // The fill walks the cel's own buffer, which sits at an offset once its layer has been
+        // moved; everything the artist and the selection speak of is in document coordinates,
+        // so each pixel is converted on the way out.
+        ImagePoint origin = session.Origin;
+
         // The selection gates traversal as well as writing, so a selection edge stops the
         // fill from leaking rather than merely preventing the write.
-        Func<int, int, bool>? canVisit = context.Selection is null
+        Func<int, int, bool>? canVisit = context.Selection is not { } selection
             ? null
-            : context.Selection.IsSelected;
+            : (x, y) => selection.IsSelected(x + origin.X, y + origin.Y);
 
         FloodFill.Fill(
             session.Pixels,
-            e.Position,
+            new ImagePoint(e.Position.X - origin.X, e.Position.Y - origin.Y),
             context.Settings.FillTolerance,
             context.Settings.IsFillContiguous,
             canVisit,
-            (x, y) => session.SetPixel(x, y, color));
+            (x, y) => session.SetPixel(x + origin.X, y + origin.Y, color));
 
         context.CommitRasterEdit(session);
     }

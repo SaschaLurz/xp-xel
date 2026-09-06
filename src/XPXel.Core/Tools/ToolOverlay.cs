@@ -25,6 +25,7 @@ namespace XPXel.Core.Tools;
 public sealed class ToolOverlay : ObservableModel
 {
     private ImageRect? _marquee;
+    private ImageRect? _cropFrame;
     private ImageRect? _caret;
 
     /// <summary>
@@ -35,6 +36,21 @@ public sealed class ToolOverlay : ObservableModel
     {
         get => _marquee;
         set => SetProperty(ref _marquee, value);
+    }
+
+    /// <summary>
+    /// The crop frame, in document coordinates, or <see langword="null"/> when the crop tool is
+    /// not in use.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Marquee"/> because the canvas draws it as something to take hold
+    /// of: handles at its corners and edges, the area outside it dimmed, and the artwork that is
+    /// currently off the canvas shown there. A marquee is a dashed rectangle and nothing more.
+    /// </remarks>
+    public ImageRect? CropFrame
+    {
+        get => _cropFrame;
+        set => SetProperty(ref _cropFrame, value);
     }
 
     /// <summary>
@@ -51,6 +67,7 @@ public sealed class ToolOverlay : ObservableModel
     public void Clear()
     {
         Marquee = null;
+        CropFrame = null;
         Caret = null;
     }
 }

@@ -162,7 +162,26 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// </remarks>
     private static readonly ImmutableDashStyle MarchingAnts = new([4, 4], 0);
 
+    /// <summary>
+    /// How dark the area outside a crop frame is drawn. A fixed translucent black rather than a
+    /// theme colour: it has to darken whatever is behind it, and in a light theme a theme-derived
+    /// shade would be the one thing that fails to.
+    /// </summary>
+    private static readonly IBrush CropShade = new ImmutableSolidColorBrush(Color.FromArgb(110, 0, 0, 0));
+
+    /// <summary>
+    /// The size of a crop handle in screen pixels, matched to the distance at which the tool
+    /// treats a press as grabbing one.
+    /// </summary>
+    private const double CropHandleSize = CropTool.GripScreenDistance;
+
     private DocumentRenderTarget? _renderTarget;
+
+    /// <summary>
+    /// The artwork that currently lies outside the canvas, built only while the crop tool is
+    /// showing a frame and disposed as soon as it is put down.
+    /// </summary>
+    private OverscanRenderTarget? _overscan;
     private PixelDocument? _observedDocument;
     private DocumentWorkspace? _observedWorkspace;
     private ToolSettings? _observedSettings;
@@ -171,10 +190,22 @@ public sealed class PixelCanvasControl : Control, IDisposable
     private TextEditSession? _observedTextEdit;
 
     /// <summary>
+    /// The traced edge of the current selection, or <see langword="null"/> when it needs
+    /// tracing again. Cleared whenever the workspace reports the selection changed.
+    /// </summary>
+    private IReadOnlyList<SelectionOutline.Segment>? _selectionOutline;
+
+    /// <summary>
     /// How the active tool is presented: which cursor it uses, and whether the canvas should
     /// outline the brush footprint under the pointer.
     /// </summary>
     private ToolPresentation _presentation = ToolPresentations.For(null);
+
+    /// <summary>
+    /// The modifier keys held as of the last thing the canvas heard about, so the cursor can say
+    /// what the next click will do before the artist makes it.
+    /// </summary>
+    private KeyModifiers _modifiers = KeyModifiers.None;
     private CanvasViewTransform _transform = CanvasViewTransform.Identity;
     private ImageSize _documentSize;
     private ImageBrush? _checkerboardBrush;
@@ -483,6 +514,9 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         _renderTarget?.Dispose();
         _renderTarget = null;
+
+        _overscan?.Dispose();
+        _overscan = null;
     }
 
     /// <inheritdoc />
@@ -504,7 +538,17 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         Rect documentRect = _transform.GetDocumentRect(workspace.Document.Size);
 
-        DrawCheckerboard(context, documentRect);
+        // While a crop frame is up, everything is drawn across the frame and the canvas
+        // together, so the artist can see what dragging outwards would bring back.
+        ImageRect? cropFrame = _observedOverlay?.CropFrame;
+        ImageRect extent = cropFrame is { } frame
+            ? frame.Union(workspace.Document.Bounds)
+            : workspace.Document.Bounds;
+
+        Rect extentRect = _transform.GetPixelRect(extent);
+
+        DrawCheckerboard(context, extentRect);
+        DrawOverscan(context, workspace, extent);
 
         WriteableBitmap bitmap = _renderTarget.GetBitmap(
             workspace.Document,
@@ -513,7 +557,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             workspace.ActiveTag);
         context.DrawImage(bitmap, new Rect(bitmap.Size), documentRect);
 
-        DrawPixelGrid(context, workspace.Document.Size, documentRect, viewport);
+        DrawPixelGrid(context, extent, extentRect, viewport);
         DrawDocumentBorder(context, documentRect);
 
         // Overlays go on top of the artwork and of each other in the order an artist reads
@@ -521,6 +565,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // where the pointer is about to act.
         DrawSelection(context, workspace.Selection);
         DrawMarquee(context);
+        DrawCropFrame(context, cropFrame, viewport);
         DrawHoverHighlight(context);
         DrawTextCaret(context);
     }
@@ -579,6 +624,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             if (context is not null)
             {
                 context.CompositeSampler = _renderTarget is null ? null : _renderTarget.SampleComposite;
+                context.ViewScale = _transform.Scale;
             }
         }
         else if (change.Property == ActiveToolProperty)
@@ -650,6 +696,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
     {
         ArgumentNullException.ThrowIfNull(e);
         base.OnKeyDown(e);
+
+        TrackModifiers(e.KeyModifiers);
 
         // Typing wins over every bare shortcut. Marking the key handled is what stops it
         // reaching the shell's key bindings, where "x" swaps the drawing colours — which is
@@ -879,7 +927,12 @@ public sealed class PixelCanvasControl : Control, IDisposable
     {
         base.OnKeyUp(e);
 
-        if (e.Key == Key.Space)
+        if (e is not null)
+        {
+            TrackModifiers(e.KeyModifiers);
+        }
+
+        if (e?.Key == Key.Space)
         {
             DisarmSpacePan();
             e.Handled = true;
@@ -890,6 +943,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
     protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
+
+        TrackModifiers(KeyModifiers.None);
 
         // Alt-tabbing away while holding space means the key-up never arrives here, which
         // would leave the canvas stuck in pan mode with a hand cursor.
@@ -924,6 +979,16 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        // A selection tool says what its modifiers will do, which takes precedence over its
+        // plain crosshair; no tool both marks pixels and draws with a colour, so the sign and
+        // the colour dot can never contend for the same corner.
+        if (_presentation.Options.HasFlag(ToolOptions.Selection)
+            && ToolCursors.SelectionMode(GetSelectionEditMode()) is { } signed)
+        {
+            Cursor = signed;
+            return;
+        }
+
         Cursor? retired = RefreshColorDotCursor();
 
         Cursor = _dotCursor ?? ToolCursors.For(_presentation);
@@ -931,6 +996,41 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // Only now that the control has been given the replacement is the cursor it was
         // wearing certainly unused, and safe to hand its platform resource back.
         retired?.Dispose();
+    }
+
+    /// <summary>What the modifier keys currently held mean to a selection tool.</summary>
+    private SelectionEditMode GetSelectionEditMode()
+    {
+        if (_modifiers.HasFlag(KeyModifiers.Control))
+        {
+            return SelectionEditMode.Subtract;
+        }
+
+        return _modifiers.HasFlag(KeyModifiers.Shift) ? SelectionEditMode.Add : SelectionEditMode.Replace;
+    }
+
+    /// <summary>
+    /// Records the modifier keys and repaints the cursor if what they mean has changed.
+    /// </summary>
+    /// <remarks>
+    /// Driven from pointer moves as well as from the keyboard, because a modifier pressed while
+    /// the canvas does not have focus never arrives as a key event — and the pointer is over the
+    /// canvas in exactly the case that matters.
+    /// </remarks>
+    private void TrackModifiers(KeyModifiers modifiers)
+    {
+        if (_modifiers == modifiers)
+        {
+            return;
+        }
+
+        SelectionEditMode before = GetSelectionEditMode();
+        _modifiers = modifiers;
+
+        if (GetSelectionEditMode() != before)
+        {
+            UpdateCursor();
+        }
     }
 
     /// <summary>
@@ -1069,6 +1169,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         Point position = e.GetPosition(this);
         UpdateHoveredPixel(position);
+        TrackModifiers(e.KeyModifiers);
 
         if (_isPanning)
         {
@@ -1207,6 +1308,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         if (ToolContext is { } context)
         {
             context.CompositeSampler = _renderTarget is null ? null : _renderTarget.SampleComposite;
+            context.ViewScale = _transform.Scale;
         }
 
         TryFitToViewport();
@@ -1230,6 +1332,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _renderTarget.InvalidateAll();
         }
 
+        // The off-canvas preview has no dirty-rectangle bookkeeping of its own: it is rebuilt
+        // when a crop frame changes, which is rarely, and this keeps it honest in between.
+        _overscan?.Invalidate();
+
         if (e.Kind == DocumentChangeKind.Size && _observedDocument is { } document)
         {
             DocumentSize = document.Size;
@@ -1242,10 +1348,15 @@ public sealed class PixelCanvasControl : Control, IDisposable
     // Drawing helpers
     // ---------------------------------------------------------------------------------
 
-    private void DrawCheckerboard(DrawingContext context, Rect documentRect)
+    /// <summary>Fills a rectangle with the transparency checkerboard.</summary>
+    /// <remarks>
+    /// Normally the document's own rectangle. While a crop frame is up it covers the frame as
+    /// well, so that the area about to be added reads as empty rather than as page background.
+    /// </remarks>
+    private void DrawCheckerboard(DrawingContext context, Rect area)
     {
         _checkerboardBrush ??= CreateCheckerboardBrush();
-        context.FillRectangle(_checkerboardBrush, documentRect);
+        context.FillRectangle(_checkerboardBrush, area);
     }
 
     /// <summary>
@@ -1299,15 +1410,32 @@ public sealed class PixelCanvasControl : Control, IDisposable
         };
     }
 
-    private void DrawPixelGrid(DrawingContext context, ImageSize size, Rect documentRect, Rect viewport)
+    /// <summary>Rules the pixel grid over an area of the canvas.</summary>
+    /// <remarks>
+    /// <para>
+    /// The area is the document, or the document and the crop frame together while one is up.
+    /// Ruling the grid across the empty space the frame has been dragged into is what says that
+    /// the space is made of pixels and can be kept — without it, dragging a frame outwards looks
+    /// like dragging it into nothing.
+    /// </para>
+    /// <para>
+    /// The grid is forced on for the same reason while the crop frame is up, whatever the View
+    /// menu says, because there it is not decoration but the explanation of the gesture.
+    /// </para>
+    /// </remarks>
+    private void DrawPixelGrid(DrawingContext context, ImageRect area, Rect areaRect, Rect viewport)
     {
-        if (!ShowPixelGrid
+        bool cropping = _observedOverlay?.CropFrame is not null;
+
+        if ((!ShowPixelGrid && !cropping)
             || _transform.Scale < CanvasViewTransform.GridVisibilityScale
             || PixelGridBrush is not { } brush)
         {
             return;
         }
 
+        Rect documentRect = areaRect;
+        ImageSize size = area.Size;
         Rect visible = documentRect.Intersect(viewport);
         if (visible.Width <= 0 || visible.Height <= 0)
         {
@@ -1465,9 +1593,16 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
     /// <summary>Outlines the current selection, if there is one.</summary>
     /// <remarks>
-    /// Only the selection's bounding rectangle is drawn, which is exact for the rectangular
-    /// marquee — the only tool that can create a selection today. A lasso or magic wand would
-    /// need the mask's own edge traced instead, and this is the one place that would change.
+    /// <para>
+    /// The mask's own edge is traced rather than its bounding rectangle. Ants around the bounds
+    /// would tell an artist who has marked five scattered pixels that a box is selected, and
+    /// they would believe it — then drag the box and watch five pixels move.
+    /// </para>
+    /// <para>
+    /// The trace is cached, because it costs a pass over the selection's bounds and the canvas
+    /// repaints for reasons that have nothing to do with the selection: every pointer move, every
+    /// zoom, every stroke. It is thrown away whenever the workspace says the selection changed.
+    /// </para>
     /// </remarks>
     private void DrawSelection(DrawingContext context, SelectionMask? selection)
     {
@@ -1479,13 +1614,38 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
-        // While the artwork is in the air the marquee goes with it, because the marquee is
-        // what the artist is aiming; the selection itself does not move until it is put down.
-        ImageRect bounds = _observedWorkspace?.ActiveTransform is { } transform
-            ? transform.Bounds
-            : selection.Bounds;
+        _selectionOutline ??= SelectionOutline.Trace(selection);
 
-        DrawMarchingAnts(context, _transform.GetPixelRect(bounds), dark, bright);
+        // While the artwork is in the air the outline goes with it, because the outline is what
+        // the artist is aiming; the selection itself does not move until it is put down.
+        ImagePoint shift = _observedWorkspace?.ActiveTransform is { } transform
+            ? transform.Offset
+            : ImagePoint.Origin;
+
+        Pen shadowPen = new(dark, 1.0);
+        Pen highlightPen = new(bright, 1.0) { DashStyle = MarchingAnts };
+
+        foreach (SelectionOutline.Segment segment in _selectionOutline)
+        {
+            Point start = ToViewPoint(segment.Start, shift);
+            Point end = ToViewPoint(segment.End, shift);
+
+            context.DrawLine(shadowPen, start, end);
+            context.DrawLine(highlightPen, start, end);
+        }
+    }
+
+    /// <summary>Converts a selection outline's grid corner into a point on screen.</summary>
+    /// <remarks>
+    /// The half-pixel offset puts the one-pixel stroke on the device grid rather than straddling
+    /// two rows of it, which would render the ants as a soft two-pixel smear.
+    /// </remarks>
+    private Point ToViewPoint(ImagePoint corner, ImagePoint shift)
+    {
+        Rect pixel = _transform.GetPixelRect(
+            new ImageRect(corner.X + shift.X, corner.Y + shift.Y, 1, 1));
+
+        return new Point(Math.Round(pixel.X) + 0.5, Math.Round(pixel.Y) + 0.5);
     }
 
     /// <summary>Outlines the rectangle a selection tool is currently dragging out.</summary>
@@ -1551,6 +1711,129 @@ public sealed class PixelCanvasControl : Control, IDisposable
         }
 
         context.DrawEllipse(null, new Pen(brush, 1.0), rect.Center, rect.Width / 2, rect.Height / 2);
+    }
+
+    /// <summary>
+    /// Draws the artwork that currently lies outside the canvas, while a crop frame is up.
+    /// </summary>
+    /// <remarks>
+    /// Only ever called with a crop frame showing, and only for the part of the region that is
+    /// not the canvas — the canvas itself is drawn over this a moment later by the ordinary
+    /// render target, which is the one that keeps a stroke cheap.
+    /// </remarks>
+    private void DrawOverscan(DrawingContext context, DocumentWorkspace workspace, ImageRect extent)
+    {
+        if (extent == workspace.Document.Bounds)
+        {
+            _overscan?.Dispose();
+            _overscan = null;
+            return;
+        }
+
+        _overscan ??= new OverscanRenderTarget();
+
+        if (_overscan.GetBitmap(workspace.Document, workspace.ActiveFrame, extent) is not { } bitmap)
+        {
+            return;
+        }
+
+        context.DrawImage(bitmap, new Rect(bitmap.Size), _transform.GetPixelRect(extent));
+    }
+
+    /// <summary>
+    /// Draws the crop frame: the area outside it dimmed, and a handle on each corner and edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Handles, because an edge is not a target.</b> A dashed line says "this is a boundary";
+    /// a solid square at the corner of one says "take hold of me here", and an artist who has
+    /// used any other editor already knows to reach for it. They are drawn at a fixed size in
+    /// screen pixels and hit-tested at the same distance, so what looks grabbable is grabbable
+    /// at every zoom — see <see cref="CropTool.GripScreenDistance"/>.
+    /// </para>
+    /// <para>
+    /// <b>Dimming outside, not inside.</b> The frame is what will be kept, so it stays at full
+    /// brightness and everything else is shaded — including the parts of the current picture
+    /// about to be trimmed away, which is precisely the thing the artist is deciding about.
+    /// </para>
+    /// </remarks>
+    private void DrawCropFrame(DrawingContext context, ImageRect? cropFrame, Rect viewport)
+    {
+        if (cropFrame is not { } frame
+            || frame.IsEmpty
+            || HighlightBrush is not { } bright
+            || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        Rect rect = _transform.GetPixelRect(frame);
+
+        // Four bands rather than a path with a hole: a rectangle subtracted from a rectangle is
+        // always four rectangles, and four fills are cheaper than a geometry every frame.
+        context.FillRectangle(CropShade, new Rect(viewport.X, viewport.Y, viewport.Width, rect.Top - viewport.Y));
+        context.FillRectangle(CropShade, new Rect(viewport.X, rect.Bottom, viewport.Width, viewport.Bottom - rect.Bottom));
+        context.FillRectangle(CropShade, new Rect(viewport.X, rect.Top, rect.Left - viewport.X, rect.Height));
+        context.FillRectangle(CropShade, new Rect(rect.Right, rect.Top, viewport.Right - rect.Right, rect.Height));
+
+        DrawOutlinedRect(context, rect, dark, bright);
+
+        // Thirds, the composition guide every crop tool draws. Faint, because they are advice.
+        DrawCropThirds(context, rect, dark);
+
+        foreach (Point handle in GetCropHandles(rect))
+        {
+            Rect box = new(
+                handle.X - (CropHandleSize / 2.0),
+                handle.Y - (CropHandleSize / 2.0),
+                CropHandleSize,
+                CropHandleSize);
+
+            context.FillRectangle(dark, box.Inflate(1));
+            context.FillRectangle(bright, box);
+        }
+    }
+
+    /// <summary>The eight points a crop frame can be taken hold of: four corners, four edges.</summary>
+    private static IEnumerable<Point> GetCropHandles(Rect rect)
+    {
+        double midX = rect.X + (rect.Width / 2.0);
+        double midY = rect.Y + (rect.Height / 2.0);
+
+        yield return new Point(rect.Left, rect.Top);
+        yield return new Point(midX, rect.Top);
+        yield return new Point(rect.Right, rect.Top);
+        yield return new Point(rect.Right, midY);
+        yield return new Point(rect.Right, rect.Bottom);
+        yield return new Point(midX, rect.Bottom);
+        yield return new Point(rect.Left, rect.Bottom);
+        yield return new Point(rect.Left, midY);
+    }
+
+    /// <summary>Rules the rule-of-thirds guides inside a crop frame.</summary>
+    /// <remarks>
+    /// Skipped on a frame too small to divide meaningfully: on a 16-pixel sprite the guides would
+    /// be three lines two pixels apart, which is clutter rather than composition.
+    /// </remarks>
+    private static void DrawCropThirds(DrawingContext context, Rect rect, IBrush brush)
+    {
+        const double minimumSize = 60.0;
+
+        if (rect.Width < minimumSize || rect.Height < minimumSize)
+        {
+            return;
+        }
+
+        Pen pen = new(brush, 1.0) { DashStyle = new ImmutableDashStyle([2, 4], 0) };
+
+        for (int i = 1; i <= 2; i++)
+        {
+            double x = Math.Round(rect.X + (rect.Width * i / 3.0)) + 0.5;
+            double y = Math.Round(rect.Y + (rect.Height * i / 3.0)) + 0.5;
+
+            context.DrawLine(pen, new Point(x, rect.Top), new Point(x, rect.Bottom));
+            context.DrawLine(pen, new Point(rect.Left, y), new Point(rect.Right, y));
+        }
     }
 
     private static void DrawMarchingAnts(DrawingContext context, Rect rect, IBrush shadow, IBrush highlight)
@@ -1806,6 +2089,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             case nameof(DocumentWorkspace.Selection):
             case nameof(DocumentWorkspace.ActiveTransform):
+                _selectionOutline = null;
                 InvalidateVisual();
                 break;
 
@@ -1866,7 +2150,25 @@ public sealed class PixelCanvasControl : Control, IDisposable
     {
         ViewTransform = transform;
         SetAndRaise(ZoomProperty, ref _zoom, transform.Scale);
+        PublishViewScale();
         InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Tells the tools how far the artist has zoomed in.
+    /// </summary>
+    /// <remarks>
+    /// Only one thing uses it, and only for hit-testing: how near the pointer has to come to a
+    /// crop handle before it takes hold of it, which is a distance in fingertips rather than in
+    /// pixels of artwork. Nothing that draws may consult it — see
+    /// <see cref="ToolContext.ViewScale"/>.
+    /// </remarks>
+    private void PublishViewScale()
+    {
+        if (ToolContext is { } context)
+        {
+            context.ViewScale = _transform.Scale;
+        }
     }
 
     private void UpdateHoveredPixel(Point position)

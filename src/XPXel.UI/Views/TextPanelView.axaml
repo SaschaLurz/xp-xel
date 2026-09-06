@@ -53,12 +53,17 @@
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
           <ComboBox Grid.Column="0"
                     ItemsSource="{Binding AvailableFontSizes}"
-                    SelectedItem="{Binding FontSize, Mode=TwoWay}"
+                    SelectedItem="{Binding SelectedFontSize, Mode=TwoWay}"
                     HorizontalAlignment="Stretch"
                     ToolTip.Tip="Font size in pixels" />
+
+          <!-- ClipValueToMinMax, because the default is to reject a number outside the range
+               and put the old one back, which tells the artist nothing about what the range is.
+               Clamping shows them the answer instead. -->
           <NumericUpDown Grid.Column="1"
                          Value="{Binding FontSize, Mode=TwoWay}"
                          Minimum="{Binding MinimumFontSize}" Maximum="512" Increment="1"
+                         ClipValueToMinMax="True"
                          FormatString="0.##"
                          ShowButtonSpinner="False"
                          Width="64" />
