@@ -27,14 +27,15 @@ public sealed record ColorSuggestionViewModel(ColorSuggestion Suggestion)
 }
 
 /// <summary>
-/// The colour editor shown when a swatch is right-clicked: the colour itself, sliders to
+/// The colour editor beneath the palette: the colour being edited, a spectrum and sliders to
 /// adjust it, and the colours that go with it.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Adjustment happens in HSV, storage in RGB.</b> "A bit darker" is one slider here and
-/// three coupled ones in the channel editor beside the palette; the two are complementary
-/// rather than redundant, which is why both exist.
+/// three coupled ones in a red-green-blue editor, which is why the panel offers these and a
+/// hexadecimal field rather than a row of channels: hue, saturation and value are the axes an
+/// artist actually reaches for, and hex is the exact value when an exact value is the point.
 /// </para>
 /// <para>
 /// <b>The hue is remembered rather than re-read.</b> A grey has no hue — every hue produces
@@ -43,10 +44,17 @@ public sealed record ColorSuggestionViewModel(ColorSuggestion Suggestion)
 /// sliders behave as three independent axes.
 /// </para>
 /// <para>
-/// The editor never writes to the document or the colour slots on its own. It reports a
-/// finished colour through <see cref="Applied"/> and <see cref="Saved"/>, and whoever opened
-/// it decides what that means — which is what lets the same editor serve a palette slot and
-/// the primary colour without knowing about either.
+/// The editor never writes to the document or the colour slots on its own. Every change the
+/// artist makes is announced through <see cref="Changed"/>, and whoever is listening decides
+/// what that means — which is what lets the same editor serve a palette slot and the plain
+/// drawing colour without knowing about either.
+/// </para>
+/// <para>
+/// <b>There is no "apply" step, and that is the point.</b> The editor sits under the palette
+/// and edits whichever swatch is selected, live: a slider moved here changes the swatch and the
+/// drawing colour as it moves. A button to confirm would put a decision between the artist and
+/// a result they can already see, and the way back from a wrong colour is the same as the way
+/// there — keep moving the slider.
 /// </para>
 /// </remarks>
 public sealed partial class ColorEditorViewModel : ViewModelBase
@@ -75,14 +83,14 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
     /// <summary>Initialises the editor.</summary>
     public ColorEditorViewModel() => Load(PixelColor.Black, "Colour", canSave: false);
 
-    /// <summary>Raised when the artist chooses to draw with the edited colour.</summary>
-    public event EventHandler<PixelColor>? Applied;
-
-    /// <summary>Raised when the artist chooses to write the edited colour back to its slot.</summary>
-    public event EventHandler<PixelColor>? Saved;
-
-    /// <summary>Raised when the artist chooses to remove the slot the editor was opened on.</summary>
-    public event EventHandler? Removed;
+    /// <summary>
+    /// Raised whenever the artist changes the colour, as they change it.
+    /// </summary>
+    /// <remarks>
+    /// Not raised by <see cref="Load"/>, which is the other direction: that is the owner
+    /// telling the editor what to show, and echoing it straight back would be a loop.
+    /// </remarks>
+    public event EventHandler<PixelColor>? Changed;
 
     /// <summary>A shading ramp running through the current colour, darkest first.</summary>
     public ObservableCollection<ColorSuggestionViewModel> Ramp { get; } = [];
@@ -113,6 +121,7 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
             if (PixelColor.TryParseHex(value, out PixelColor parsed) && parsed != _color)
             {
                 Load(parsed, TargetLabel, CanSave);
+                Changed?.Invoke(this, _color);
             }
         }
     }
@@ -145,8 +154,9 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
     /// <param name="color">The colour to edit.</param>
     /// <param name="label">What is being edited, for the heading — "Slot 3", say.</param>
     /// <param name="canSave">
-    /// Whether the colour has a slot to be written back to. False when the editor was opened
-    /// on something that has no home of its own, such as the primary colour.
+    /// Whether the colour has a palette slot behind it. False when the editor is showing a
+    /// drawing colour that is not in the palette — picked off the canvas, say — in which case
+    /// the panel offers to add it rather than pretending it is already there.
     /// </param>
     public void Load(PixelColor color, string label, bool canSave)
     {
@@ -172,11 +182,12 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
         NotifyColorChanged();
     }
 
-    /// <summary>Loads one of the suggested colours into the editor for further adjustment.</summary>
+    /// <summary>Takes one of the suggested colours as the colour being edited.</summary>
     /// <param name="suggestion">The suggestion the artist clicked.</param>
     /// <remarks>
-    /// Clicking a suggestion edits rather than commits, so a ramp can be walked along —
-    /// shadow, then its shadow — before anything is chosen.
+    /// The ramp and the harmonies recompute around the new colour, so a ramp can still be
+    /// walked along — a shadow, then its shadow — with each step going straight to the slot
+    /// and the brush the way every other change here does.
     /// </remarks>
     [RelayCommand]
     private void PickSuggestion(ColorSuggestionViewModel? suggestion)
@@ -184,20 +195,9 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
         if (suggestion is not null)
         {
             Load(suggestion.Color, TargetLabel, CanSave);
+            Changed?.Invoke(this, _color);
         }
     }
-
-    /// <summary>Draws with the edited colour without changing the slot it came from.</summary>
-    [RelayCommand]
-    private void Apply() => Applied?.Invoke(this, _color);
-
-    /// <summary>Writes the edited colour back into the slot it was opened on.</summary>
-    [RelayCommand]
-    private void Save() => Saved?.Invoke(this, _color);
-
-    /// <summary>Removes the slot the editor was opened on.</summary>
-    [RelayCommand]
-    private void Remove() => Removed?.Invoke(this, EventArgs.Empty);
 
     partial void OnHueChanged(double value) => ApplyFromSliders();
 
@@ -227,6 +227,7 @@ public sealed partial class ColorEditorViewModel : ViewModelBase
 
         RefreshSuggestions();
         NotifyColorChanged();
+        Changed?.Invoke(this, _color);
     }
 
     private void RefreshSuggestions()

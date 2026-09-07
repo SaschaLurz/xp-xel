@@ -1,0 +1,58 @@
+<!--
+  The saved layouts, where they are renamed, reordered and removed.
+
+  Names are edited in place - renaming is the most common thing anyone does to a list like
+  this, and a second dialog for it would be more ceremony than the act deserves. Nothing is
+  written until Done, so Cancel puts every rename back.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             x:Class="XPXel.UI.Views.ManageLayoutsDialogView"
+             x:DataType="dialogs:ManageLayoutsDialogViewModel">
+
+  <Border Classes="dialogSurface" MinWidth="420">
+    <StackPanel Spacing="14">
+
+      <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+
+      <TextBlock Text="You have not saved a layout yet. Arrange the panels as you like them, then choose View ▸ Layouts ▸ Save Current Layout."
+                 IsVisible="{Binding IsEmpty}"
+                 Classes="subtle"
+                 TextWrapping="Wrap" />
+
+      <ScrollViewer MaxHeight="320" IsVisible="{Binding !IsEmpty}">
+        <ItemsControl ItemsSource="{Binding Rows}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="dialogs:LayoutRowViewModel">
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,6">
+                <TextBox Grid.Column="0"
+                         Text="{Binding Name, Mode=TwoWay}"
+                         ToolTip.Tip="The name this layout has in the View menu" />
+                <Button Grid.Column="1" Content="↑" Width="28" Padding="0" Margin="6,0,0,0"
+                        Command="{Binding $parent[ItemsControl].((dialogs:ManageLayoutsDialogViewModel)DataContext).MoveUpCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="Move it up the menu" />
+                <Button Grid.Column="2" Content="↓" Width="28" Padding="0" Margin="4,0,0,0"
+                        Command="{Binding $parent[ItemsControl].((dialogs:ManageLayoutsDialogViewModel)DataContext).MoveDownCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="Move it down the menu" />
+                <Button Grid.Column="3" Content="Remove" Margin="8,0,0,0"
+                        Command="{Binding $parent[ItemsControl].((dialogs:ManageLayoutsDialogViewModel)DataContext).RemoveCommand}"
+                        CommandParameter="{Binding}"
+                        ToolTip.Tip="Forget this layout. The panels on screen do not change" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" />
+        <Button Content="Done" IsDefault="True" Command="{Binding ConfirmCommand}" />
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+
+</UserControl>

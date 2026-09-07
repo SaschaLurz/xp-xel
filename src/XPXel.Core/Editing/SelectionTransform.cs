@@ -35,38 +35,86 @@ namespace XPXel.Core.Editing;
 /// artwork landed, so a move can be followed by another move, and so an undo does not leave the
 /// marquee sitting over the hole the artwork used to fill.
 /// </para>
+/// <para>
+/// <b>A paste is the same thing with nothing lifted.</b> Pasted pixels float over the layer
+/// exactly as moved ones do — draggable, nudgeable with the arrow keys, placed with Enter and
+/// abandoned with Escape — and the only difference is that no hole is punched where they came
+/// from, because they did not come from anywhere on this layer. Sharing one class is what makes
+/// paste land already in the artist's hand rather than stamped down wherever the program chose;
+/// see <see cref="BeginPaste"/>.
+/// </para>
 /// </remarks>
 public sealed class SelectionTransform
 {
-    /// <summary>What the Edit menu calls this, and what the history entry is named.</summary>
-    private const string ActionName = "Move Selection";
+    /// <summary>What the Edit menu calls a move, and what the history entry is named.</summary>
+    private const string MoveActionName = "Move Selection";
+
+    /// <summary>What it calls a paste.</summary>
+    private const string PasteActionName = "Paste";
 
     private readonly DocumentWorkspace _workspace;
     private readonly RasterEditSession _session;
-    private readonly SelectionMask _selection;
+
+    /// <summary>The selection to put back on undo, or <see langword="null"/> if there was none.</summary>
+    private readonly SelectionMask? _selectionBefore;
+
     private readonly ImageRect _source;
 
-    /// <summary>The lifted artwork, row by row across <see cref="_source"/>.</summary>
+    /// <summary>The floating artwork, row by row across <see cref="_source"/>.</summary>
     private readonly PixelColor[] _lifted;
 
-    /// <summary>Which of those pixels were actually selected, and so actually move.</summary>
-    private readonly bool[] _covered;
+    /// <summary>
+    /// How much of each of those pixels belongs to the shape being moved, row by row.
+    /// </summary>
+    /// <remarks>
+    /// Coverage rather than a plain flag, so that the marquee this produces on commit is the
+    /// one the artist actually had rather than a flattened version of it.
+    /// </remarks>
+    private readonly byte[] _coverage;
+
+    /// <summary>
+    /// Whether the artwork was taken off the layer, and so leaves a hole behind it.
+    /// </summary>
+    /// <remarks>
+    /// False for a paste, where the pixels came from the clipboard: clearing the region under
+    /// them would punch a hole in artwork the artist never asked to change.
+    /// </remarks>
+    private readonly bool _leavesAHole;
 
     private SelectionTransform(
         DocumentWorkspace workspace,
         RasterEditSession session,
-        SelectionMask selection,
+        SelectionMask? selectionBefore,
         ImageRect source,
         PixelColor[] lifted,
-        bool[] covered)
+        byte[] coverage,
+        bool leavesAHole,
+        string actionName)
     {
         _workspace = workspace;
         _session = session;
-        _selection = selection;
+        _selectionBefore = selectionBefore;
         _source = source;
         _lifted = lifted;
-        _covered = covered;
+        _coverage = coverage;
+        _leavesAHole = leavesAHole;
+        ActionName = actionName;
     }
+
+    /// <summary>What the Edit menu calls this transform.</summary>
+    public string ActionName { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether this is the selection itself in the air, rather than a
+    /// clip arriving from the clipboard.
+    /// </summary>
+    /// <remarks>
+    /// The canvas asks so that it can outline the right thing. A moved selection is whatever
+    /// shape the artist marked and the marching ants travel with it; a pasted clip is a
+    /// rectangle that has nothing to do with whatever happened to be marked before it arrived,
+    /// so the box around it is the only honest outline to draw.
+    /// </remarks>
+    public bool MovesTheSelection => _leavesAHole;
 
     /// <summary>How far the artwork has been moved from where it was lifted.</summary>
     public ImagePoint Offset { get; private set; }
@@ -104,7 +152,7 @@ public sealed class SelectionTransform
         int count = source.Width * source.Height;
 
         PixelColor[] lifted = new PixelColor[count];
-        bool[] covered = new bool[count];
+        byte[] coverage = new byte[count];
         bool any = false;
 
         for (int y = 0; y < source.Height; y++)
@@ -115,12 +163,14 @@ public sealed class SelectionTransform
                 int sx = source.Left + x;
                 int sy = source.Top + y;
 
-                if (!selection.IsSelected(sx, sy))
+                byte covered = selection.GetCoverage(sx, sy);
+
+                if (covered == 0)
                 {
                     continue;
                 }
 
-                covered[index] = true;
+                coverage[index] = covered;
                 lifted[index] = cel.Pixels.GetPixelOrTransparent(sx - cel.Offset.X, sy - cel.Offset.Y);
                 any = true;
             }
@@ -132,9 +182,58 @@ public sealed class SelectionTransform
         }
 
         // No selection is passed to the session on purpose; see the type remarks.
-        RasterEditSession session = RasterEditSession.Begin(workspace.Document, cel, ActionName);
+        RasterEditSession session = RasterEditSession.Begin(workspace.Document, cel, MoveActionName);
 
-        return new SelectionTransform(workspace, session, selection.Clone(), source, lifted, covered);
+        return new SelectionTransform(
+            workspace,
+            session,
+            selection.Clone(),
+            source,
+            lifted,
+            coverage,
+            leavesAHole: true,
+            MoveActionName);
+    }
+
+    /// <summary>Floats a clip over the active layer, ready to be placed.</summary>
+    /// <param name="workspace">The document to paste into.</param>
+    /// <param name="clip">The pixels to paste.</param>
+    /// <param name="origin">Where the clip's top-left corner should land.</param>
+    /// <returns>
+    /// The transform, or <see langword="null"/> when there is nothing to paste into — a locked
+    /// or hidden layer, or one that is not a drawing layer — or nothing worth pasting.
+    /// </returns>
+    /// <remarks>
+    /// The pixels are stamped down straight away rather than on the first drag, so the artist
+    /// sees what arrived and where. It is still floating at that point: dragging it, nudging it
+    /// or pressing Escape all work, and nothing reaches the history until it is placed.
+    /// </remarks>
+    public static SelectionTransform? BeginPaste(DocumentWorkspace workspace, PixelClip clip, ImagePoint origin)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(clip);
+
+        if (clip.IsEmpty || workspace.GetOrCreateActiveCel() is not { } cel)
+        {
+            return null;
+        }
+
+        ImageRect source = new(origin.X, origin.Y, clip.Size.Width, clip.Size.Height);
+
+        RasterEditSession session = RasterEditSession.Begin(workspace.Document, cel, PasteActionName);
+
+        SelectionTransform transform = new(
+            workspace,
+            session,
+            workspace.Selection?.Clone(),
+            source,
+            clip.Pixels.ToArray(),
+            clip.Coverage.ToArray(),
+            leavesAHole: false,
+            PasteActionName);
+
+        transform.Render();
+        return transform;
     }
 
     /// <summary>Moves the lifted artwork to a given displacement from where it started.</summary>
@@ -174,7 +273,7 @@ public sealed class SelectionTransform
             return null;
         }
 
-        SetSelectionCommand marquee = new(_workspace, _selection, TranslateSelection(), ActionName);
+        SetSelectionCommand marquee = new(_workspace, _selectionBefore, TranslateSelection(), ActionName);
         marquee.Redo();
 
         return new CompositeCommand(ActionName, [pixels, marquee]);
@@ -194,21 +293,25 @@ public sealed class SelectionTransform
         // drawn from the original artwork rather than from the last position's leavings.
         _session.ResetToOriginal();
 
-        // Dragged back to where it started, the artwork is home and the reset has already put
+        // Dragged back to where it started, moved artwork is home and the reset has already put
         // it there. Punching the hole and stamping it back would leave the session holding a
-        // dirty region that nothing actually changed, and commit a do-nothing undo entry.
-        if (!HasMoved)
+        // dirty region that nothing actually changed, and commit a do-nothing undo entry. A
+        // paste has no such home: at offset zero it is still the thing that has to be stamped.
+        if (_leavesAHole && !HasMoved)
         {
             return;
         }
 
-        for (int y = 0; y < _source.Height; y++)
+        if (_leavesAHole)
         {
-            for (int x = 0; x < _source.Width; x++)
+            for (int y = 0; y < _source.Height; y++)
             {
-                if (_covered[(y * _source.Width) + x])
+                for (int x = 0; x < _source.Width; x++)
                 {
-                    _session.SetPixel(_source.Left + x, _source.Top + y, PixelColor.Transparent);
+                    if (_coverage[(y * _source.Width) + x] > 0)
+                    {
+                        _session.SetPixel(_source.Left + x, _source.Top + y, PixelColor.Transparent);
+                    }
                 }
             }
         }
@@ -219,7 +322,7 @@ public sealed class SelectionTransform
             {
                 int index = (y * _source.Width) + x;
 
-                if (_covered[index])
+                if (_coverage[index] > 0)
                 {
                     _session.SetPixel(
                         _source.Left + x + Offset.X,
@@ -232,26 +335,37 @@ public sealed class SelectionTransform
         _session.PublishInterimChanges();
     }
 
-    /// <summary>Builds the marquee in its new position.</summary>
+    /// <summary>
+    /// Builds the marquee around wherever the artwork has ended up.
+    /// </summary>
+    /// <remarks>
+    /// Traced from the transform's own coverage rather than from the selection it started with,
+    /// so that it says the same thing for a paste — which began with no selection at all, and
+    /// ends with the pasted shape marked, ready to be moved again or deleted.
+    /// </remarks>
     private SelectionMask TranslateSelection()
     {
-        SelectionMask moved = new(_selection.Size);
+        SelectionMask moved = new(_workspace.Document.Size);
 
-        for (int y = _source.Top; y < _source.Bottom; y++)
+        for (int y = 0; y < _source.Height; y++)
         {
-            for (int x = _source.Left; x < _source.Right; x++)
+            for (int x = 0; x < _source.Width; x++)
             {
-                byte coverage = _selection.GetCoverage(x, y);
+                byte coverage = _coverage[(y * _source.Width) + x];
 
                 if (coverage > 0)
                 {
                     // Anything pushed off the canvas is simply dropped, which matches what
                     // happened to the pixels: the session could not write them either.
-                    moved.SetCoverage(x + Offset.X, y + Offset.Y, coverage);
+                    moved.SetCoverage(
+                        _source.Left + x + Offset.X,
+                        _source.Top + y + Offset.Y,
+                        coverage);
                 }
             }
         }
 
+        moved.RecalculateBounds();
         return moved;
     }
 }

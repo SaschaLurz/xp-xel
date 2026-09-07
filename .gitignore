@@ -111,3 +111,7 @@ desktop.ini
 
 # AI session / prompt context scaffolding - local working notes, not project source
 initial-prompt-context-info.txt
+
+# Claude Code's per-machine settings: tool permissions granted on this machine, and nobody
+# else's business. The shared .claude/settings.json and any skills stay tracked.
+.claude/settings.local.json

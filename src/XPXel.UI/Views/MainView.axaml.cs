@@ -16,9 +16,10 @@ namespace XPXel.UI.Views;
 /// <para>
 /// Two kinds of shortcut end up here. The zoom keys, because plus and minus have to be
 /// accepted in both their main-keyboard and numeric-keypad forms, which one gesture cannot
-/// say. And every <b>bare</b> key — X to swap the colours, one letter per tool — because a
-/// <c>KeyBinding</c> fires wherever the key is pressed, so binding "B" to the brush would
-/// switch tools in the middle of renaming a layer to "Body".
+/// say. And every <b>bare</b> key — X to swap the colours, one letter per tool, Escape to
+/// deselect and Delete to clear what is marked — because a <c>KeyBinding</c> fires wherever the
+/// key is pressed, so binding "B" to the brush would switch tools in the middle of renaming a
+/// layer to "Body", and binding Backspace would erase the artwork instead of a character.
 /// </para>
 /// <para>
 /// <b>Why the handler is on the window rather than on this control.</b> A key event routes
@@ -89,7 +90,11 @@ public partial class MainView : UserControl
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            HandleZoomShortcut(viewModel, e);
+            if (!HandleClipboardShortcut(viewModel, e))
+            {
+                HandleZoomShortcut(viewModel, e);
+            }
+
             return;
         }
 
@@ -99,6 +104,62 @@ public partial class MainView : UserControl
         }
 
         HandleBareKey(viewModel, e);
+    }
+
+    /// <summary>
+    /// Handles Ctrl+C, Ctrl+X and Ctrl+V, unless something is being typed into.
+    /// </summary>
+    /// <returns><see langword="true"/> if the key was one of the three, handled or deliberately left alone.</returns>
+    /// <remarks>
+    /// <para>
+    /// These are here rather than declared as <c>KeyBinding</c>s because a text box already has
+    /// its own meaning for all three, and a binding fires wherever the key is pressed. Claiming
+    /// Ctrl+V globally would make it impossible to paste a name into the layers panel, and
+    /// Ctrl+C there would copy pixels instead of the word under the caret.
+    /// </para>
+    /// <para>
+    /// A text layer being typed on the canvas is the one exception, and only for paste: there is
+    /// no text box to hand the key to, and pasted words belong in the words being typed. Copy and
+    /// cut are held back there entirely — neither has a meaning for a caret with nothing selected,
+    /// and cutting pixels out from under someone mid-sentence is not what they asked for.
+    /// </para>
+    /// </remarks>
+    private bool HandleClipboardShortcut(MainViewModel viewModel, KeyEventArgs e)
+    {
+        if (e.KeyModifiers != KeyModifiers.Control)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.C or Key.X when !IsTypingSomewhere():
+                Execute(e.Key == Key.C ? viewModel.CopyCommand : viewModel.CutCommand, e);
+                return true;
+
+            case Key.V when !IsTypingIntoTextBox():
+                Execute(viewModel.PasteCommand, e);
+                return true;
+
+            case Key.C or Key.X or Key.V:
+                // Being typed into: the key belongs to the text box or the text layer, and is
+                // claimed here only so that the zoom shortcuts are not offered it next.
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Runs a command if it is available, and marks the key as dealt with either way.</summary>
+    private static void Execute(System.Windows.Input.ICommand command, KeyEventArgs e)
+    {
+        if (command.CanExecute(null))
+        {
+            command.Execute(null);
+        }
+
+        e.Handled = true;
     }
 
     private static void HandleZoomShortcut(MainViewModel viewModel, KeyEventArgs e)
@@ -133,6 +194,31 @@ public partial class MainView : UserControl
 
     private static void HandleBareKey(MainViewModel viewModel, KeyEventArgs e)
     {
+        // Escape and the two delete keys act on the selection, and they reach this handler only
+        // when nothing nearer has claimed them: the canvas takes Escape first to cancel a move
+        // or to put a crop frame back, and takes Backspace and Delete first while a text layer
+        // is being typed into. What is left over is the case an artist means by these keys when
+        // there are marching ants on screen — get rid of them, or get rid of what they mark.
+        switch (e.Key)
+        {
+            case Key.Escape:
+                viewModel.DeselectCommand.Execute(null);
+                e.Handled = true;
+                return;
+
+            case Key.Delete or Key.Back:
+                if (viewModel.EraseSelectionCommand.CanExecute(null))
+                {
+                    viewModel.EraseSelectionCommand.Execute(null);
+                    e.Handled = true;
+                }
+
+                return;
+
+            default:
+                break;
+        }
+
         // The digit row picks a colour out of the palette's first ten, the way a game's
         // hotbar works. Checked before the letters because the two ranges do not overlap and
         // this is the more frequent of the two by a wide margin.
@@ -192,10 +278,18 @@ public partial class MainView : UserControl
     /// <summary>
     /// Whether the keystroke is text the artist is entering rather than a shortcut.
     /// </summary>
-    private bool IsTypingSomewhere()
-    {
-        object? focused = _keyboardHost?.FocusManager?.GetFocusedElement();
+    private bool IsTypingSomewhere() =>
+        IsTypingIntoTextBox()
+        || _keyboardHost?.FocusManager?.GetFocusedElement() is PixelCanvasControl { IsEditingText: true };
 
-        return focused is TextBox or AutoCompleteBox or PixelCanvasControl { IsEditingText: true };
-    }
+    /// <summary>
+    /// Whether an ordinary text box has the keyboard — a layer's name, an animation's name.
+    /// </summary>
+    /// <remarks>
+    /// Narrower than <see cref="IsTypingSomewhere"/> on purpose. A text box has its own copy,
+    /// cut and paste and must keep them; a text layer on the canvas has no text box at all, and
+    /// paste there is the shell's job.
+    /// </remarks>
+    private bool IsTypingIntoTextBox() =>
+        _keyboardHost?.FocusManager?.GetFocusedElement() is TextBox or AutoCompleteBox;
 }

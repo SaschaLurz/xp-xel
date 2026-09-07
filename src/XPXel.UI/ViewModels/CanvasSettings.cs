@@ -57,6 +57,20 @@ public sealed partial class CanvasSettings : ObservableObject
     [ObservableProperty]
     private bool _showColorSwatchCursor = true;
 
+    /// <summary>
+    /// Whether the grey checkerboard is drawn behind the artwork to mark transparency.
+    /// </summary>
+    /// <remarks>
+    /// On by default, because a transparent pixel and a white one are otherwise the same
+    /// picture and telling them apart is the whole job of the pattern. It is switchable
+    /// because it is also the busiest thing on the canvas: fine detail drawn over it is read
+    /// against a moving check rather than a flat ground, and when the artist wants to judge
+    /// the artwork itself the honest answer is to take the pattern away and let the canvas
+    /// background show through.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _showTransparencyChecker = true;
+
     /// <summary>How far one zoom step travels, where 1 is the default.</summary>
     /// <remarks>
     /// A setting rather than a constant because there is no one right answer: someone drawing

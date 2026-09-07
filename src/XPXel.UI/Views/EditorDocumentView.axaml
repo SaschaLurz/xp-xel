@@ -70,6 +70,7 @@
                                  ActiveTool="{Binding Toolbox.ActiveTool}"
                                  ShowPixelGrid="{Binding CanvasSettings.ShowPixelGrid}"
                                  ShowColorSwatch="{Binding CanvasSettings.ShowColorSwatchCursor}"
+                                 ShowTransparencyChecker="{Binding CanvasSettings.ShowTransparencyChecker}"
                                  ZoomSpeed="{Binding CanvasSettings.ZoomSpeed}"
                                  OnionSkin="{Binding CanvasSettings.OnionSkin}"
                                  Zoom="{Binding Zoom, Mode=TwoWay}"

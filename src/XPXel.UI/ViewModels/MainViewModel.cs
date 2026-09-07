@@ -58,6 +58,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly ColorSlots _colors;
     private readonly XpDockFactory _factory;
     private readonly DockLayoutStore _layoutStore;
+    private readonly LayoutPresetStore _layoutPresets;
+    private readonly ClipboardService _clipboard;
     private readonly AutosaveService _autosave;
     private readonly AnimationExportService _animationExport;
     private readonly AnimationExportRegistry _animationFormats;
@@ -84,6 +86,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <param name="fileDialog">Asks the artist to choose files.</param>
     /// <param name="themeService">Controls the light or dark appearance.</param>
     /// <param name="layoutStore">Remembers the panel arrangement between sessions.</param>
+    /// <param name="layoutPresets">Keeps the arrangements the artist has saved by name.</param>
     /// <param name="toolSettings">The shared tool options.</param>
     /// <param name="colors">The primary and secondary colours.</param>
     public MainViewModel(
@@ -99,12 +102,14 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         IFileDialogService fileDialog,
         IThemeService themeService,
         DockLayoutStore layoutStore,
+        LayoutPresetStore layoutPresets,
         ToolSettings toolSettings,
         ColorSlots colors,
         AnimationExportService animationExport,
         AnimationExportRegistry animationFormats,
         AutosaveService autosave,
-        HistoryPanelViewModel history)
+        HistoryPanelViewModel history,
+        ClipboardService clipboard)
     {
         ArgumentNullException.ThrowIfNull(toolbox);
         ArgumentNullException.ThrowIfNull(layers);
@@ -116,6 +121,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(fileDialog);
         ArgumentNullException.ThrowIfNull(themeService);
         ArgumentNullException.ThrowIfNull(layoutStore);
+        ArgumentNullException.ThrowIfNull(layoutPresets);
         ArgumentNullException.ThrowIfNull(toolSettings);
         ArgumentNullException.ThrowIfNull(colors);
         ArgumentNullException.ThrowIfNull(timeline);
@@ -124,6 +130,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(animationFormats);
         ArgumentNullException.ThrowIfNull(autosave);
         ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(clipboard);
 
         Toolbox = toolbox;
         Layers = layers;
@@ -135,11 +142,13 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _fileDialog = fileDialog;
         _themeService = themeService;
         _layoutStore = layoutStore;
+        _layoutPresets = layoutPresets;
         _toolSettings = toolSettings;
         _colors = colors;
         _animationExport = animationExport;
         _animationFormats = animationFormats;
         _autosave = autosave;
+        _clipboard = clipboard;
 
         Timeline = timeline;
         Preview = preview;
@@ -158,6 +167,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         Panels = [.. _factory.Definitions.Select(d => new PanelToggleViewModel(d.Id, d.Title, OnPanelToggled))];
 
+        RefreshLayouts();
         BuildLayout(restoreSaved: true);
         AddDocument(new DocumentWorkspace(PixelDocument.CreateNew(new ImageSize(32, 32))), file: null);
 
@@ -194,6 +204,17 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// One checkable entry per panel for the View menu, showing which are on screen.
     /// </summary>
     public ObservableCollection<PanelToggleViewModel> Panels { get; }
+
+    /// <summary>
+    /// The layouts the View menu offers: the two built in, then the artist's own.
+    /// </summary>
+    /// <remarks>
+    /// Rebuilt from <see cref="LayoutPresetStore"/> whenever the saved list changes, rather
+    /// than kept in step entry by entry. The list is a handful of items and changes when
+    /// somebody clicks something, so the rebuild is imperceptible and there is no chance of the
+    /// menu and the store disagreeing.
+    /// </remarks>
+    public ObservableCollection<LayoutEntryViewModel> Layouts { get; } = [];
 
     /// <summary>Canvas view options shared by every open document.</summary>
     public CanvasSettings CanvasSettings { get; }
@@ -677,21 +698,151 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private void ResetLayout()
     {
         _layoutStore.Clear();
+        SwapLayout(_factory.CreateLayout(), wasRestored: false, "Layout reset to default");
+    }
 
+    /// <summary>Switches to one of the layouts the View menu lists.</summary>
+    /// <param name="entry">The layout that was chosen.</param>
+    /// <remarks>
+    /// Reached through the entry's own command rather than as a command on the shell, because a
+    /// submenu's items live in a popup and cannot reliably see the shell to bind to it.
+    /// </remarks>
+    /// <remarks>
+    /// A built-in layout is rebuilt from the factory rather than restored from a stored copy,
+    /// so "Default" always means what this version of the editor means by it. A saved one that
+    /// will not deserialise — written by an older build, or truncated — falls back to the
+    /// default rather than leaving the artist with no layout at all, and says so.
+    /// </remarks>
+    private void ApplyLayout(LayoutEntryViewModel? entry)
+    {
+        if (entry is null)
+        {
+            return;
+        }
+
+        if (entry.IsBuiltIn)
+        {
+            SwapLayout(
+                entry.IsSimple ? _factory.CreateSimpleLayout() : _factory.CreateLayout(),
+                wasRestored: false,
+                $"Layout: {entry.Name}");
+            return;
+        }
+
+        if (_layoutStore.Deserialize(entry.Layout) is not { } restored)
+        {
+            SwapLayout(
+                _factory.CreateLayout(),
+                wasRestored: false,
+                $"Could not read the layout \"{entry.Name}\" — showing the default one");
+            return;
+        }
+
+        SwapLayout(restored, wasRestored: true, $"Layout: {entry.Name}");
+    }
+
+    /// <summary>Saves the panels as they stand now under a name the artist chooses.</summary>
+    [RelayCommand]
+    private async Task SaveLayoutAsAsync()
+    {
+        if (Layout is not { } layout || _layoutStore.Serialize(layout) is not { } serialised)
+        {
+            StatusMessage = "Could not save this layout";
+            return;
+        }
+
+        List<LayoutPreset> presets = [.. _layoutPresets.Load()];
+
+        if (await Dialogs.ShowAsync(new SaveLayoutDialogViewModel(
+                [.. presets.Select(p => p.Name)],
+                SuggestLayoutName(presets))).ConfigureAwait(true) is not string name)
+        {
+            return;
+        }
+
+        // Saving under an existing name replaces that layout in place, keeping its position in
+        // the menu — which is what "update that one" means to the person who just typed it.
+        int existing = presets.FindIndex(p => string.Equals(p.Name, name, StringComparison.CurrentCultureIgnoreCase));
+
+        if (existing >= 0)
+        {
+            presets[existing] = new LayoutPreset(name, serialised);
+        }
+        else
+        {
+            presets.Add(new LayoutPreset(name, serialised));
+        }
+
+        _layoutPresets.Save(presets);
+        RefreshLayouts();
+        StatusMessage = $"Saved the layout \"{name}\"";
+    }
+
+    /// <summary>Opens the list of saved layouts for renaming, reordering and removal.</summary>
+    [RelayCommand]
+    private async Task ManageLayoutsAsync()
+    {
+        if (await Dialogs.ShowAsync(new ManageLayoutsDialogViewModel(_layoutPresets.Load())).ConfigureAwait(true)
+            is not IReadOnlyList<LayoutPreset> edited)
+        {
+            return;
+        }
+
+        _layoutPresets.Save(edited);
+        RefreshLayouts();
+        StatusMessage = "Layouts updated";
+    }
+
+    /// <summary>
+    /// Puts a different arrangement on screen, carrying every open document across.
+    /// </summary>
+    /// <remarks>
+    /// Open documents survive a layout change: losing unsaved artwork because a panel was in
+    /// the wrong place would be an unforgivable trade. They are lifted out of the old tree
+    /// before it is replaced and re-attached to the new one afterwards, which is the same
+    /// dance a reset has always done.
+    /// </remarks>
+    private void SwapLayout(IRootDock incoming, bool wasRestored, string message)
+    {
         List<EditorDocument> documents = Layout is { } layout
             ? [.. XpDockFactory.Enumerate(layout).OfType<EditorDocument>()]
             : [];
 
-        BuildLayout(restoreSaved: false);
+        InstallLayout(incoming, wasRestored);
 
-        // Open documents survive a reset: losing unsaved artwork because a panel was in the
-        // wrong place would be an unforgivable trade.
         foreach (EditorDocument document in documents)
         {
             AttachDocument(document);
         }
 
-        StatusMessage = "Layout reset to default";
+        StatusMessage = message;
+    }
+
+    /// <summary>Rebuilds the View menu's list of layouts from what is saved.</summary>
+    private void RefreshLayouts()
+    {
+        Layouts.Clear();
+        Layouts.Add(LayoutEntryViewModel.Default(ApplyLayout));
+        Layouts.Add(LayoutEntryViewModel.Simple(ApplyLayout));
+
+        foreach (LayoutPreset preset in _layoutPresets.Load())
+        {
+            Layouts.Add(LayoutEntryViewModel.Saved(preset.Name, preset.Layout, ApplyLayout));
+        }
+    }
+
+    /// <summary>A name for a new layout that is not already taken.</summary>
+    private static string SuggestLayoutName(IReadOnlyList<LayoutPreset> presets)
+    {
+        for (int i = 1; ; i++)
+        {
+            string candidate = i == 1 ? "My layout" : $"My layout {i}";
+
+            if (!presets.Any(p => string.Equals(p.Name, candidate, StringComparison.CurrentCultureIgnoreCase)))
+            {
+                return candidate;
+            }
+        }
     }
 
     /// <summary>
@@ -884,6 +1035,70 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Copies the marked pixels to the clipboard.</summary>
+    /// <remarks>
+    /// The bitmap it leaves on the system clipboard is what other programs will paste; XP-xel's
+    /// own exact pixels travel beside it. See <see cref="ClipboardService"/>.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private async Task CopyAsync()
+    {
+        if (Workspace is { } workspace)
+        {
+            StatusMessage = (await _clipboard.CopyAsync(workspace, cut: false).ConfigureAwait(true)).Message;
+        }
+    }
+
+    /// <summary>Copies the marked pixels and clears them.</summary>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private async Task CutAsync()
+    {
+        if (Workspace is { } workspace)
+        {
+            StatusMessage = (await _clipboard.CopyAsync(workspace, cut: true).ConfigureAwait(true)).Message;
+        }
+    }
+
+    /// <summary>Pastes whatever the clipboard is carrying.</summary>
+    /// <remarks>
+    /// <para>
+    /// Always available while a document is open, because what the clipboard holds cannot be
+    /// known without reading it and a menu item cannot wait on that. A paste with nothing to
+    /// paste says so in the status bar and changes nothing.
+    /// </para>
+    /// <para>
+    /// Pasted pixels arrive floating, in the artist's hand: Enter places them, Escape puts them
+    /// back, the arrow keys nudge them. Pasted words arrive as an editable text layer.
+    /// </para>
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasDocument))]
+    private async Task PasteAsync()
+    {
+        if (Workspace is { } workspace)
+        {
+            StatusMessage = (await _clipboard.PasteAsync(workspace).ConfigureAwait(true)).Message;
+        }
+    }
+
+    /// <summary>Clears the marked pixels on the active layer.</summary>
+    /// <remarks>
+    /// Bound to Delete and Backspace, which is what those keys do to a selection in every
+    /// editor an artist will have used before this one. The marks stay behind afterwards,
+    /// because the usual next act is to draw something else in the space just cleared.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void EraseSelection()
+    {
+        if (Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        StatusMessage = workspace.EraseSelection()
+            ? "Erased the marked pixels"
+            : "Nothing to erase — the layer is locked, hidden, or not a drawing layer";
+    }
+
     /// <summary>Swaps what is selected for what is not.</summary>
     [RelayCommand(CanExecute = nameof(HasDocument))]
     private void InvertSelection()
@@ -949,22 +1164,41 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
     private void BuildLayout(bool restoreSaved)
     {
-        IRootDock? restored = restoreSaved ? _layoutStore.Load() : null;
-
-        if (restored is not null)
+        if ((restoreSaved ? _layoutStore.Load() : null) is { } restored)
         {
-            // A restored layout carries structure but no view models, so the live panels are
-            // put back before it is initialised and anything tries to render them, and any
-            // document shells left over from the last session are dropped.
-            _factory.RestorePanelContent(restored);
-            XpDockFactory.RemoveRestoredDocuments(restored);
+            InstallLayout(restored, wasRestored: true);
+            return;
         }
 
-        IRootDock layout = restored ?? _factory.CreateLayout();
+        InstallLayout(_factory.CreateLayout(), wasRestored: false);
+    }
+
+    /// <summary>Makes a layout the one on screen.</summary>
+    /// <param name="layout">The layout to install.</param>
+    /// <param name="wasRestored">
+    /// Whether the layout was read back from stored text rather than built by the factory.
+    /// </param>
+    /// <remarks>
+    /// <b>The repair steps are only for a layout that came off disk</b>, and running them on a
+    /// freshly built one is not merely wasteful — it takes the panels straight back out of it,
+    /// leaving a shell of empty docks that collapse to nothing. A stored layout carries
+    /// structure but no view models, because a serialiser has no way to write out a live
+    /// toolbox, so its panels are put back by id and any document shells left over from the
+    /// session that saved it are dropped. A layout the factory has just built already holds the
+    /// real panels and has no documents in it at all.
+    /// </remarks>
+    private void InstallLayout(IRootDock layout, bool wasRestored)
+    {
+        if (wasRestored)
+        {
+            _factory.RestorePanelContent(layout);
+            XpDockFactory.RemoveRestoredDocuments(layout);
+        }
+
         _factory.InitLayout(layout);
 
-        // Bring back any panels that were floating when the editor last closed. Without this
-        // they exist in the restored tree but have no window on screen.
+        // Bring back any panels that were floating when the layout was saved. Without this they
+        // exist in the tree but have no window on screen.
         if (layout.Windows is { Count: > 0 } && layout.ShowWindows.CanExecute(null))
         {
             layout.ShowWindows.Execute(null);
@@ -1156,6 +1390,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         if (e.PropertyName is nameof(DocumentWorkspace.Selection) or nameof(DocumentWorkspace.ActiveTransform))
         {
             CropToSelectionCommand.NotifyCanExecuteChanged();
+            EraseSelectionCommand.NotifyCanExecuteChanged();
+            CopyCommand.NotifyCanExecuteChanged();
+            CutCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -1203,6 +1440,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         InvertSelectionCommand.NotifyCanExecuteChanged();
         ChangeCanvasSizeCommand.NotifyCanExecuteChanged();
         CropToSelectionCommand.NotifyCanExecuteChanged();
+        EraseSelectionCommand.NotifyCanExecuteChanged();
+        CopyCommand.NotifyCanExecuteChanged();
+        CutCommand.NotifyCanExecuteChanged();
+        PasteCommand.NotifyCanExecuteChanged();
     }
 
     private void OnToolboxPropertyChanged(object? sender, PropertyChangedEventArgs e)

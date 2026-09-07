@@ -82,6 +82,14 @@
       <views:ExportAnimationDialogView />
     </DataTemplate>
 
+    <DataTemplate DataType="dialogs:SaveLayoutDialogViewModel">
+      <views:SaveLayoutDialogView />
+    </DataTemplate>
+
+    <DataTemplate DataType="dialogs:ManageLayoutsDialogViewModel">
+      <views:ManageLayoutsDialogView />
+    </DataTemplate>
+
     <DataTemplate DataType="dialogs:CanvasSizeDialogViewModel">
       <views:CanvasSizeDialogView />
     </DataTemplate>

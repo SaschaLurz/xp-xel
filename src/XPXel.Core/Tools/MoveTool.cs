@@ -31,6 +31,14 @@ namespace XPXel.Core.Tools;
 /// opaque pixel would make a layer of thin outlines nearly impossible to grab, and asking "which
 /// layer did you mean?" is what the layers panel is for.
 /// </para>
+/// <para>
+/// <b>A selection narrows what "this" means.</b> Having marked some pixels, an artist who
+/// reaches for the move tool means those pixels and not the layer they sit on — moving the whole
+/// layer at that point would silently undo the work of making the selection. So when something
+/// is marked the press is handed to <see cref="Editing.SelectionTransform"/> instead, exactly as
+/// a press inside the marquee is on every selection tool, and only an empty selection moves the
+/// layer as a whole.
+/// </para>
 /// </remarks>
 public sealed class MoveTool : ITool
 {
@@ -53,7 +61,7 @@ public sealed class MoveTool : ITool
 
     /// <inheritdoc />
     public string Description =>
-        "Drag to move everything on the active layer. What goes past the edge is kept, not cut.";
+        "Drag to move the marked pixels, or the whole layer when nothing is marked. What goes past the edge is kept, not cut.";
 
     /// <inheritdoc />
     public void OnPointerPressed(ToolContext context, ToolPointerEventArgs e)
@@ -62,6 +70,15 @@ public sealed class MoveTool : ITool
         ArgumentNullException.ThrowIfNull(e);
 
         if (e.Button != ToolPointerButton.Left || !context.Workspace.CanEditActiveLayer)
+        {
+            return;
+        }
+
+        // Marked pixels are what the artist means by "this", so they are lifted and the layer
+        // is left where it is. The canvas notices the transform appearing and turns the press
+        // it has already delivered into a drag of the lifted artwork, so the move starts on
+        // this gesture rather than on the next one.
+        if (context.Workspace.Selection is { IsEmpty: false } && context.Workspace.BeginTransform())
         {
             return;
         }

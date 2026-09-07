@@ -21,6 +21,11 @@ from a single codebase.
   remembered between sessions; **View → Panels** ticks the ones on screen and switches any
   of them on or off individually, and **Default layout** in the options bar puts everything
   back without closing a single document.
+- **Layouts you name and keep.** Arrange the panels for the job in hand and save the
+  arrangement under a name; **View → Layouts** lists it beside the two that ship with the
+  editor, and **Manage Layouts** renames, reorders and removes the ones you saved. **Simple**
+  is the beginner's arrangement — the colour panel, the tools and the canvas, and nothing
+  else — and every panel it leaves out is still one tick away in **View → Panels**.
 - **Layers and folders**, with per-layer opacity, visibility, locking, fourteen W3C-standard
   blend modes, a live preview of each layer's own contents, colour labels, renaming, and
   drag-and-drop restacking. Group layers into folders — hiding or fading a folder hides or
@@ -53,17 +58,34 @@ from a single codebase.
   that Godot, Phaser and most importers already understand. Also numbered **PNG frames**, an
   animated **GIF** for showing people, and an **APNG** for the same without losing a colour.
 - **Selections** — drag a rectangular marquee and every tool is clipped to it, with Select
-  All, Deselect and Invert in the Select menu.
+  All, Deselect and Invert in the Select menu. `Esc` clears a selection, so does clicking the
+  empty space beside the picture, and `Delete` or `Backspace` erases what is marked.
+- **Copy, cut and paste, in and out of the editor.** `Ctrl` `C` and `Ctrl` `X` take what is
+  marked — the exact pixels, alpha and all, and the shape of a selection that is not a
+  rectangle. What lands on the system clipboard is an ordinary image as well, so it pastes
+  into a chat window or another editor. `Ctrl` `V` takes an XP-xel clip, an image copied from
+  anywhere else, or **text**, which arrives as an editable text layer rather than as pixels.
+  Pasted artwork lands **floating**: drag it, nudge it with the arrow keys, place it with
+  `Enter`, or press `Esc` and it was never there. Something cut comes back where it was cut
+  from, which is what makes "cut, change layer, paste" mean what it looks like.
 - **Undo and redo** for every edit, with a stroke, a shape or a whole episode of typing each
   counting as one step.
 - **Canvas**: nearest-neighbour zoom to 64×, hold **Space** to grab and drag the image, a
-  transparency checkerboard, a pixel grid that appears as you zoom in, a highlight on the
-  pixel under the pointer, and **rulers** down the top and left edges numbered from 1, with
-  the pointer's own coordinate in the status bar.
+  transparency checkerboard that can be switched off when it is more noise than information,
+  a pixel grid that appears as you zoom in, a highlight on the pixel under the pointer, and
+  **rulers** down the top and left edges numbered from 1, with the pointer's own coordinate in
+  the status bar.
 - **Canvas size, both ways.** **Image → Canvas Size** crops a 32×32 down to 16×32 or grows it
   to 64×64, with a nine-way anchor deciding which part of the artwork keeps its place. **Crop to
   Selection** does the same from a marquee, and the **crop tool** (`C`) puts a frame with handles
-  around the picture that drags in to trim or out to enlarge.
+  around the picture that drags in to trim or out to enlarge. The pointer opens into a hand over
+  the frame and closes while you drag it, and the ground outside the frame stays ruled and
+  visible under a dimming wash, so what you would be adding or trimming is in front of you.
+- **Move what you mean.** With something marked, the move tool moves *that* rather than the
+  layer under it, and so does a drag begun on the marching ants themselves — the pointer turns
+  into the four-way arrow as it crosses the edge, whichever tool is in hand, so a mark can be
+  made and moved without a trip back to the toolbox. With nothing marked, `V` moves the whole
+  layer as it always has.
 - **Nothing falls off the edge.** Move a layer with `V` and whatever leaves the canvas is kept,
   hidden rather than cut, exactly as a shape dragged half off a slide stays on the slide. Drag it
   back, grow the canvas, or open the crop tool — which shows you what is out there — and it
@@ -73,12 +95,14 @@ from a single codebase.
   on every selection tool, the marching ants trace the actual edge rather than a bounding box, and
   `Ctrl`-clicking a layer's preview marks everything that layer paints.
 - **Colour**: a spectrum picker — a saturation-and-value square beside a hue strip, the
-  layout every image editor uses — plus a palette whose first ten swatches are a **hotbar** — they carry the numbers
-  1–9 and 0, and those keys pick them, so the colour you want is one keystroke away. Right-
-  click any swatch for the colour editor: hue, saturation, value and alpha sliders, a shading
-  ramp that shifts shadows towards blue and highlights towards yellow the way light actually
-  behaves, and the colour's complement and analogous hues. Plus the RGBA channel editor and
-  hexadecimal input.
+  layout every image editor uses — sitting directly under the palette and wired into it. The
+  palette is at the top of the panel, its first ten swatches a **hotbar** carrying the numbers
+  1–9 and 0 so the colour you want is one keystroke away, and the swatch you are working on is
+  ringed in blue inside white. The editor below edits *that* swatch: move a slider and the
+  swatch and the brush follow it as it moves, with no "save to palette" step to remember. Hue,
+  saturation, value and alpha, a hexadecimal field for an exact value, a shading ramp that
+  shifts shadows towards blue and highlights towards yellow the way light actually behaves, and
+  the colour's complement and analogous hues.
 - **The drawing colour follows the pointer** as a small round dot attached to the cursor
   itself, so you can see what a stroke will lay down without looking away from the canvas.
   **View → Show Colour by the Cursor** turns it off.
@@ -136,8 +160,12 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Mark individual pixels / magic wand | `K` / `W` |
 | Add to a selection / take away from it | Hold `Shift` / hold `Ctrl`, on any selection tool |
 | Mark everything on a layer | `Ctrl`-click its preview in the layers panel |
-| Move what you have marked | Press inside it and drag, or `Ctrl` `T`, or right-click it |
-| Move a whole layer | `V`, then drag |
+| Move what you have marked | Drag its edge, or press inside it and drag, or `Ctrl` `T` |
+| Copy / cut / paste what you have marked | `Ctrl` `C` / `Ctrl` `X` / `Ctrl` `V` |
+| Place or abandon something pasted | `Enter` / `Esc` |
+| Erase what you have marked | `Delete` or `Backspace` |
+| Clear the selection | `Esc`, or click beside the picture, or `Ctrl` `D` |
+| Move a whole layer | `V`, then drag, with nothing marked |
 | Crop | `C`, drag the frame's handles, then `Enter` |
 | Draw | Left mouse button |
 | Open the active tool's settings | Right-click the canvas |
@@ -147,7 +175,9 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
 | Swap the primary and secondary colours | `X` |
 | Pick a palette colour | `1`–`9` and `0` for the first ten swatches |
-| Edit a colour on the spectrum, and save it to the palette | Right-click a swatch |
+| Edit a colour on the spectrum | Click its swatch; the editor below the palette follows it |
+| Add the current colour to the palette, or remove one | `+` / `−` beside the palette heading |
+| Save the panel arrangement, or return to one | View → Layouts |
 | New / open / save / export | `Ctrl` `N` / `O` / `S` / `E` |
 | Export the animation | `Ctrl` `Shift` `E` |
 | Close the current document | `Ctrl` `W` |

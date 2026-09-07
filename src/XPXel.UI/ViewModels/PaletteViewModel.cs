@@ -11,14 +11,18 @@ using XPXel.Core.Primitives;
 namespace XPXel.UI.ViewModels;
 
 /// <summary>
-/// The colour panel: the two active colours, a channel editor for the primary one, and the
-/// document's palette.
+/// The colour panel: the document's palette, and a colour editor wired straight into
+/// whichever swatch of it is selected.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The two active colours live in <see cref="ColorSlots"/>, which is application state,
-/// while the palette belongs to the document. This view model presents both together
-/// because that is how they are used — pick from the palette, adjust, put it back.
+/// <b>The palette comes first, and the editor edits a slot.</b> Choosing a colour is a
+/// two-part act — find roughly the right one, then adjust it — and the palette is where the
+/// first part happens, so it sits at the top where it is always in reach. The editor below
+/// is not a separate place to make colours: it is a view of the selected swatch, and moving a
+/// slider in it changes that swatch and the drawing colour together, as the slider moves.
+/// There is no "save to palette" step because there is nothing to save; the swatch is already
+/// the thing being edited.
 /// </para>
 /// <para>
 /// <b>The palette's first ten colours are a hotbar.</b> They are numbered on screen and
@@ -29,17 +33,16 @@ namespace XPXel.UI.ViewModels;
 /// saved with the document and needs no storage of its own.
 /// </para>
 /// <para>
-/// <b>The editor is channel sliders plus a hexadecimal field, not a colour wheel.</b> That
-/// is a deliberate v0.1 choice rather than a limitation of the design: exact numeric values
-/// are what pixel artists actually work with, hex is how palettes are shared, and both are
-/// unambiguous. A spectrum picker is a worthwhile addition later and would slot in beside
-/// these controls, writing to the same <see cref="ColorSlots"/>.
+/// <b>A drawing colour that is not in the palette is still editable.</b> The eyedropper, the
+/// X key and a shading ramp can all leave the drawing colour on something the palette has
+/// never held. The editor follows it anyway, no swatch is outlined, and the panel offers to
+/// add it — which is the honest state of affairs rather than silently overwriting whichever
+/// swatch happened to be selected a moment ago.
 /// </para>
 /// <para>
-/// <b>Beware the synchronisation loop.</b> The channels, the hex field and the model all
-/// describe the same colour. Writing any one of them notifies the others, which would
-/// recurse without the <c>_isSynchronising</c> guard. Anything added here that touches the
-/// colour must go through <see cref="ApplyPrimary"/>.
+/// <b>Beware the synchronisation loop.</b> The editor, the palette and the colour slots all
+/// describe the same colour, and each notifies the others. <c>_isSynchronising</c> is what
+/// keeps that from recursing; anything added here that touches the colour must respect it.
 /// </para>
 /// </remarks>
 public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
@@ -48,25 +51,13 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
     private bool _isSynchronising;
 
     [ObservableProperty]
-    private double _red;
-
-    [ObservableProperty]
-    private double _green;
-
-    [ObservableProperty]
-    private double _blue;
-
-    [ObservableProperty]
-    private double _alpha;
-
-    [ObservableProperty]
-    private string _hex = "#000000";
-
-    [ObservableProperty]
     private Palette? _palette;
 
+    /// <summary>The swatch the editor is pointed at, or <see langword="null"/> for none.</summary>
+    [ObservableProperty]
+    private PaletteSwatchViewModel? _selectedSwatch;
+
     private INotifyCollectionChanged? _observedColors;
-    private PaletteSwatchViewModel? _editing;
 
     /// <summary>Initialises the panel.</summary>
     /// <param name="colors">The application's primary and secondary colours.</param>
@@ -77,9 +68,7 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
         _colors = colors;
         _colors.PropertyChanged += OnColorSlotsChanged;
 
-        Editor.Applied += OnEditorApplied;
-        Editor.Saved += OnEditorSaved;
-        Editor.Removed += OnEditorRemoved;
+        Editor.Changed += OnEditorChanged;
 
         PullFromModel();
     }
@@ -94,14 +83,27 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
     public ObservableCollection<PaletteSwatchViewModel> Swatches { get; } = [];
 
     /// <summary>
-    /// The editor behind the right-click flyout.
+    /// The colour editor shown beneath the palette.
     /// </summary>
     /// <remarks>
-    /// One shared instance rather than one per swatch: only one flyout can be open at a time,
-    /// and each editor recomputes a ramp and five harmonies on every slider move, which is
-    /// not work to do twenty times over for swatches nobody is looking at.
+    /// One instance for the panel rather than one per swatch: only one colour is ever being
+    /// edited, and each editor recomputes a ramp and five harmonies on every slider move,
+    /// which is not work to do twenty times over for swatches nobody is looking at.
     /// </remarks>
     public ColorEditorViewModel Editor { get; } = new();
+
+    /// <summary>Gets a value indicating whether a palette slot is being edited.</summary>
+    /// <remarks>
+    /// When it is not, the drawing colour came from somewhere else — the eyedropper, a
+    /// harmony, the other colour slot — and the panel offers to add it to the palette rather
+    /// than showing a remove button for a slot that does not exist.
+    /// </remarks>
+    public bool IsEditingSwatch => SelectedSwatch is not null;
+
+    /// <summary>What the editor is currently editing, for the heading above it.</summary>
+    public string EditorHeading => SelectedSwatch is not { } swatch
+        ? "Not in the palette"
+        : swatch.HasHotkey ? $"Slot {swatch.HotkeyLabel}" : $"Colour {swatch.Index + 1}";
 
     /// <summary>Points the panel at a different document's palette, or at none.</summary>
     /// <param name="workspace">The document to present.</param>
@@ -111,6 +113,7 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
 
         ObserveColors(Palette?.Colors as INotifyCollectionChanged);
         RebuildSwatches();
+        PullFromModel();
     }
 
     /// <inheritdoc />
@@ -119,9 +122,7 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
         _colors.PropertyChanged -= OnColorSlotsChanged;
         ObserveColors(null);
 
-        Editor.Applied -= OnEditorApplied;
-        Editor.Saved -= OnEditorSaved;
-        Editor.Removed -= OnEditorRemoved;
+        Editor.Changed -= OnEditorChanged;
     }
 
     /// <summary>Selects the colour a number key names, if the palette has one there.</summary>
@@ -141,91 +142,124 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
         }
 
         int index = digit == 0 ? Core.Documents.Palette.HotbarSize - 1 : digit - 1;
-        if (Palette is not { } palette || index >= palette.Colors.Count)
+
+        if (index >= Swatches.Count)
         {
             return false;
         }
 
-        _colors.Primary = palette.Colors[index];
+        Select(Swatches[index]);
         return true;
     }
 
-    /// <summary>Points the right-click editor at a swatch.</summary>
-    /// <param name="swatch">The swatch that was right-clicked.</param>
-    public void BeginEdit(PaletteSwatchViewModel swatch)
+    /// <summary>Makes a swatch the one the editor and the brush are both pointed at.</summary>
+    /// <param name="swatch">The swatch that was clicked, or <see langword="null"/> to select none.</param>
+    public void Select(PaletteSwatchViewModel? swatch)
     {
-        ArgumentNullException.ThrowIfNull(swatch);
+        // Guarded, because assigning the drawing colour comes straight back as a change
+        // notification, and the panel answering that would re-derive the selection from the
+        // colour — landing on the first swatch holding it rather than on the one just clicked.
+        _isSynchronising = true;
+        try
+        {
+            SetSelectedSwatch(swatch);
 
-        _editing = swatch;
+            if (swatch is not null)
+            {
+                _colors.Primary = swatch.Color;
+            }
+        }
+        finally
+        {
+            _isSynchronising = false;
+        }
 
-        string label = swatch.HasHotkey ? $"Slot {swatch.HotkeyLabel}" : $"Colour {swatch.Index + 1}";
-        Editor.Load(swatch.Color, label, canSave: true);
+        if (swatch is not null)
+        {
+            LoadEditor(swatch.Color);
+        }
     }
-
-    /// <summary>Points the right-click editor at the primary colour, which has no slot.</summary>
-    public void BeginEditPrimary()
-    {
-        _editing = null;
-        Editor.Load(_colors.Primary, "Primary colour", canSave: false);
-    }
-
-    /// <summary>Loads a palette colour into the primary slot.</summary>
-    /// <param name="color">The colour to load.</param>
-    [RelayCommand]
-    private void SelectPrimary(PixelColor color) => _colors.Primary = color;
-
-    /// <summary>Loads a palette colour into the secondary slot.</summary>
-    /// <param name="color">The colour to load.</param>
-    [RelayCommand]
-    private void SelectSecondary(PixelColor color) => _colors.Secondary = color;
 
     /// <summary>Exchanges the primary and secondary colours.</summary>
     [RelayCommand]
     private void SwapColors() => _colors.Swap();
 
-    /// <summary>Appends the primary colour to the palette, if it is not already present.</summary>
-    [RelayCommand]
-    private void AddPrimaryToPalette()
-    {
-        if (Palette is { } palette && palette.IndexOf(_colors.Primary) < 0)
-        {
-            palette.Add(_colors.Primary);
-        }
-    }
-
-    /// <summary>Loads a swatch's colour into the primary slot.</summary>
+    /// <summary>Loads a swatch's colour into the brush and the editor.</summary>
     /// <param name="swatch">The swatch that was clicked.</param>
     [RelayCommand]
-    private void SelectSwatch(PaletteSwatchViewModel? swatch)
+    private void SelectSwatch(PaletteSwatchViewModel? swatch) => Select(swatch);
+
+    /// <summary>
+    /// Appends the current drawing colour to the palette and selects it there.
+    /// </summary>
+    /// <remarks>
+    /// A colour already in the palette is selected rather than added a second time — two
+    /// swatches of the same colour are two ways to reach one colour and one more thing to
+    /// keep tidy.
+    /// </remarks>
+    [RelayCommand]
+    private void AddCurrentToPalette()
     {
-        if (swatch is not null)
+        if (Palette is not { } palette)
         {
-            _colors.Primary = swatch.Color;
+            return;
+        }
+
+        int existing = palette.IndexOf(_colors.Primary);
+
+        if (existing < 0)
+        {
+            palette.Add(_colors.Primary);
+            existing = palette.Colors.Count - 1;
+        }
+
+        if (existing < Swatches.Count)
+        {
+            Select(Swatches[existing]);
         }
     }
 
-    private void OnEditorApplied(object? sender, PixelColor color) => _colors.Primary = color;
-
-    private void OnEditorSaved(object? sender, PixelColor color)
+    /// <summary>Takes the selected colour out of the palette.</summary>
+    /// <remarks>
+    /// The drawing colour is left exactly as it was. Removing a swatch says "I do not need
+    /// this in the palette", not "stop drawing with this", and an artist mid-stroke would not
+    /// thank the panel for deciding otherwise.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(IsEditingSwatch))]
+    private void RemoveSelectedFromPalette()
     {
-        if (Palette is { } palette && _editing is { } swatch && swatch.Index < palette.Colors.Count)
-        {
-            palette.Replace(swatch.Index, color);
-        }
-
-        // Writing a colour into a slot is also how an artist says "this is the one I want",
-        // so it becomes the drawing colour as well rather than needing a second click.
-        _colors.Primary = color;
-    }
-
-    private void OnEditorRemoved(object? sender, EventArgs e)
-    {
-        if (Palette is { } palette && _editing is { } swatch && swatch.Index < palette.Colors.Count)
+        if (Palette is { } palette && SelectedSwatch is { } swatch && swatch.Index < palette.Colors.Count)
         {
             palette.RemoveAt(swatch.Index);
         }
+    }
 
-        _editing = null;
+    /// <summary>
+    /// Carries a change made in the editor out to the palette slot and the drawing colour.
+    /// </summary>
+    private void OnEditorChanged(object? sender, PixelColor color)
+    {
+        if (_isSynchronising)
+        {
+            return;
+        }
+
+        _isSynchronising = true;
+        try
+        {
+            _colors.Primary = color;
+
+            if (Palette is { } palette && SelectedSwatch is { } swatch && swatch.Index < palette.Colors.Count)
+            {
+                palette.Replace(swatch.Index, color);
+            }
+
+            OnPropertyChanged(nameof(PrimaryBrush));
+        }
+        finally
+        {
+            _isSynchronising = false;
+        }
     }
 
     private void ObserveColors(INotifyCollectionChanged? colors)
@@ -248,8 +282,28 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void OnPaletteColorsChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+    /// <summary>Keeps the swatches in step with the palette behind them.</summary>
+    /// <remarks>
+    /// A colour replaced in place updates the one swatch that holds it. Every other change
+    /// moves positions around — and the position is the number printed on a swatch and the key
+    /// that selects it — so the list is rebuilt, which is the only way to be sure the digits
+    /// and the keyboard still agree.
+    /// </remarks>
+    private void OnPaletteColorsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        if (e.Action == NotifyCollectionChangedAction.Replace
+            && e.NewStartingIndex >= 0
+            && e.NewStartingIndex < Swatches.Count
+            && Palette is { } palette)
+        {
+            Swatches[e.NewStartingIndex].Color = palette.Colors[e.NewStartingIndex];
+            return;
+        }
+
         RebuildSwatches();
+    }
 
     /// <summary>
     /// Rebuilds every swatch rather than patching the one that changed.
@@ -258,93 +312,82 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
     /// A swatch carries its own position, so removing a colour renumbers everything after it
     /// — and the number is the key that selects it. Rebuilding is the only way to be sure the
     /// printed digits and the keyboard agree, and a palette has tens of entries, not
-    /// thousands.
+    /// thousands. The selection is re-derived afterwards from the drawing colour, so a
+    /// rebuild does not silently leave the editor pointed at a slot that has moved.
     /// </remarks>
     private void RebuildSwatches()
     {
         Swatches.Clear();
 
-        if (Palette is not { } palette)
+        if (Palette is { } palette)
+        {
+            for (int i = 0; i < palette.Colors.Count; i++)
+            {
+                Swatches.Add(new PaletteSwatchViewModel(i, palette.Colors[i]));
+            }
+        }
+
+        SetSelectedSwatch(FindSwatch(_colors.Primary));
+    }
+
+    /// <summary>The first swatch holding a colour, or <see langword="null"/> if none does.</summary>
+    private PaletteSwatchViewModel? FindSwatch(PixelColor color) =>
+        Swatches.FirstOrDefault(s => s.Color == color);
+
+    /// <summary>Moves the selection outline, and tells the panel what it is now editing.</summary>
+    private void SetSelectedSwatch(PaletteSwatchViewModel? swatch)
+    {
+        if (ReferenceEquals(SelectedSwatch, swatch))
         {
             return;
         }
 
-        for (int i = 0; i < palette.Colors.Count; i++)
+        if (SelectedSwatch is { } previous)
         {
-            Swatches.Add(new PaletteSwatchViewModel(i, palette.Colors[i]));
+            previous.IsSelected = false;
         }
+
+        SelectedSwatch = swatch;
+
+        if (swatch is not null)
+        {
+            swatch.IsSelected = true;
+        }
+
+        OnPropertyChanged(nameof(IsEditingSwatch));
+        OnPropertyChanged(nameof(EditorHeading));
+        RemoveSelectedFromPaletteCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnRedChanged(double value) => ApplyPrimaryFromChannels();
-
-    partial void OnGreenChanged(double value) => ApplyPrimaryFromChannels();
-
-    partial void OnBlueChanged(double value) => ApplyPrimaryFromChannels();
-
-    partial void OnAlphaChanged(double value) => ApplyPrimaryFromChannels();
-
-    partial void OnHexChanged(string value)
+    /// <summary>Shows a colour in the editor without echoing it straight back out again.</summary>
+    private void LoadEditor(PixelColor color)
     {
-        // Typing is incremental, so an unparseable value is normal and simply ignored until
-        // it becomes valid rather than being rejected with an error.
-        if (!_isSynchronising && PixelColor.TryParseHex(value, out PixelColor parsed))
-        {
-            ApplyPrimary(parsed);
-        }
-    }
-
-    private void ApplyPrimaryFromChannels() => ApplyPrimary(new PixelColor(
-        (byte)Math.Clamp(Red, 0, 255),
-        (byte)Math.Clamp(Green, 0, 255),
-        (byte)Math.Clamp(Blue, 0, 255),
-        (byte)Math.Clamp(Alpha, 0, 255)));
-
-    private void ApplyPrimary(PixelColor color)
-    {
-        if (_isSynchronising)
-        {
-            return;
-        }
-
+        bool wasSynchronising = _isSynchronising;
         _isSynchronising = true;
         try
         {
-            _colors.Primary = color;
-            PushToUi(color);
+            Editor.Load(color, EditorHeading, canSave: SelectedSwatch is not null);
         }
         finally
         {
-            _isSynchronising = false;
+            _isSynchronising = wasSynchronising;
         }
-    }
-
-    private void PullFromModel()
-    {
-        _isSynchronising = true;
-        try
-        {
-            PushToUi(_colors.Primary);
-        }
-        finally
-        {
-            _isSynchronising = false;
-        }
-    }
-
-    private void PushToUi(PixelColor color)
-    {
-        Red = color.R;
-        Green = color.G;
-        Blue = color.B;
-        Alpha = color.A;
-        Hex = color.ToHex();
 
         OnPropertyChanged(nameof(PrimaryBrush));
+    }
+
+    /// <summary>Brings the panel into line with the drawing colour it was handed.</summary>
+    private void PullFromModel()
+    {
+        SetSelectedSwatch(FindSwatch(_colors.Primary));
+        LoadEditor(_colors.Primary);
         OnPropertyChanged(nameof(SecondaryBrush));
     }
 
     private void OnColorSlotsChanged(object? sender, PropertyChangedEventArgs e)
     {
+        ArgumentNullException.ThrowIfNull(e);
+
         if (_isSynchronising)
         {
             return;
@@ -352,6 +395,9 @@ public sealed partial class PaletteViewModel : ViewModelBase, IDisposable
 
         if (e.PropertyName == nameof(ColorSlots.Primary))
         {
+            // The colour came from somewhere outside this panel — the eyedropper, a swap, an
+            // undo — so the editor follows it, and the outline moves to the swatch that holds
+            // it if the palette has one.
             PullFromModel();
         }
         else if (e.PropertyName == nameof(ColorSlots.Secondary))

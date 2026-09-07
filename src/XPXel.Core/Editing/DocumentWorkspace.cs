@@ -220,6 +220,38 @@ public sealed class DocumentWorkspace : ObservableModel
         return true;
     }
 
+    /// <summary>Floats a clip over the active layer, ready for the artist to place it.</summary>
+    /// <param name="clip">The pixels to paste.</param>
+    /// <returns><see langword="true"/> if the clip is now in the artist's hand.</returns>
+    /// <remarks>
+    /// <para>
+    /// Pasting puts anything already floating down first, rather than discarding it. Two things
+    /// cannot be in one hand, and of the two possible answers — lose the first or keep it — only
+    /// one of them can be undone.
+    /// </para>
+    /// <para>
+    /// <b>It lands floating rather than stamped.</b> Where a paste should go is a question only
+    /// the artist can answer, so it arrives already picked up: drag it, nudge it with the arrow
+    /// keys, place it with Enter, or press Escape and it was never there. Where it starts is
+    /// <see cref="PixelClip.GetPasteOrigin"/>'s decision — back where it was cut from when that
+    /// still fits, and the middle of the canvas otherwise.
+    /// </para>
+    /// </remarks>
+    public bool BeginPaste(PixelClip clip)
+    {
+        ArgumentNullException.ThrowIfNull(clip);
+
+        CommitTransform();
+
+        if (SelectionTransform.BeginPaste(this, clip, clip.GetPasteOrigin(Document.Bounds)) is not { } transform)
+        {
+            return false;
+        }
+
+        ActiveTransform = transform;
+        return true;
+    }
+
     /// <summary>Abandons a move, putting the pixels back where they came from.</summary>
     public void CancelTransform()
     {
@@ -463,6 +495,64 @@ public sealed class DocumentWorkspace : ObservableModel
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Clears every marked pixel on the active layer, as one undoable step.
+    /// </summary>
+    /// <param name="actionName">
+    /// What the history entry is called. Cutting erases exactly as deleting does, and the only
+    /// thing the artist needs told apart in the Edit menu is which of the two they asked for.
+    /// </param>
+    /// <returns><see langword="true"/> if anything was actually erased.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is what Delete and Backspace do, and it is the other half of making a selection
+    /// useful: having marked something, the two things an artist wants next are to move it and
+    /// to get rid of it. Every other editor of this kind spends the same two keys on it.
+    /// </para>
+    /// <para>
+    /// <b>Erased, not cut.</b> The pixels become transparent rather than being filled with a
+    /// colour — a hole in a sprite is what "delete" means here, and the layer beneath is what
+    /// should show through it.
+    /// </para>
+    /// <para>
+    /// <b>The marks stay behind.</b> Deleting does not deselect, because the usual next action
+    /// is to draw something else in the space just cleared, and clearing the marks would throw
+    /// away the shape the artist would need to make again.
+    /// </para>
+    /// </remarks>
+    public bool EraseSelection(string actionName = "Erase")
+    {
+        ArgumentException.ThrowIfNullOrEmpty(actionName);
+
+        if (Selection is not { IsEmpty: false } selection || GetOrCreateActiveCel() is not { } cel)
+        {
+            return false;
+        }
+
+        // The session is handed the selection, so it clips the writes for us and a mark that
+        // extends past the canvas edge simply has no effect there.
+        RasterEditSession session = RasterEditSession.Begin(Document, cel, actionName, selection);
+        ImageRect region = selection.Bounds.Intersect(Document.Bounds);
+
+        for (int y = region.Top; y < region.Bottom; y++)
+        {
+            for (int x = region.Left; x < region.Right; x++)
+            {
+                session.SetPixel(x, y, PixelColor.Transparent);
+            }
+        }
+
+        if (session.Commit() is not { } command)
+        {
+            return false;
+        }
+
+        // The pixels are already cleared by the time the command exists, so it is recorded
+        // rather than executed.
+        History.Push(command);
+        return true;
     }
 
     /// <summary>Records that the document has just been saved to <paramref name="filePath"/>.</summary>

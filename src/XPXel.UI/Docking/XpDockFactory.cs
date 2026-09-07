@@ -64,6 +64,8 @@ public sealed class XpDockFactory : Factory
     public const string DocumentsDockId = "Documents";
 
     private const string LeftTopDockId = "LeftTopDock";
+    private const string ToolStripDockId = "ToolStripDock";
+    private const string CentreColumnId = "CentreColumn";
     private const string LeftBottomDockId = "LeftBottomDock";
     private const string RightTopDockId = "RightTopDock";
     private const string RightBottomDockId = "RightBottomDock";
@@ -108,13 +110,13 @@ public sealed class XpDockFactory : Factory
 
         Definitions =
         [
-            new PanelDefinition("Toolbox", "Tools", toolbox, LeftTopDockId, Alignment.Left),
+            new PanelDefinition("Toolbox", "Tools", toolbox, ToolStripDockId, Alignment.Top),
+            new PanelDefinition("Colour", "Colour", palette, LeftTopDockId, Alignment.Left),
             new PanelDefinition("Brush", "Brush", brush, LeftBottomDockId, Alignment.Left),
             new PanelDefinition("Text", "Text", text, LeftBottomDockId, Alignment.Left),
+            new PanelDefinition("Preview", "Preview", preview, LeftBottomDockId, Alignment.Left),
             new PanelDefinition("Layers", "Layers", layers, RightTopDockId, Alignment.Right),
-            new PanelDefinition("Colour", "Colour", palette, RightBottomDockId, Alignment.Right),
-            new PanelDefinition("Preview", "Preview", preview, RightBottomDockId, Alignment.Right),
-            new PanelDefinition("History", "History", history, RightTopDockId, Alignment.Right),
+            new PanelDefinition("History", "History", history, RightBottomDockId, Alignment.Right),
             new PanelDefinition("Timeline", "Timeline", timeline, BottomDockId, Alignment.Bottom),
         ];
     }
@@ -126,10 +128,44 @@ public sealed class XpDockFactory : Factory
     public IDocumentDock? DocumentDock { get; private set; }
 
     /// <inheritdoc />
-    public override IRootDock CreateLayout()
-    {
-        _panels.Clear();
+    /// <remarks>
+    /// The arrangement an artist actually settled on after using the editor, rather than the
+    /// one that fell out of the docking library's defaults. Colour on the left because it is
+    /// reached constantly and belongs beside the drawing hand; the tools in a strip across the
+    /// top of the canvas rather than in a tall column, so the canvas gets the width; layers and
+    /// history stacked down the right, which is where every editor of this kind puts them; and
+    /// the timeline under the canvas only, rather than across the whole shell, so the side
+    /// panels run the full height of the window.
+    /// </remarks>
+    public override IRootDock CreateLayout() => BuildRoot(BuildDefaultShell());
 
+    /// <summary>
+    /// Builds the pared-back arrangement: the colour panel, the tools and the canvas, and
+    /// nothing else.
+    /// </summary>
+    /// <returns>A layout with only the three panels a beginner needs.</returns>
+    /// <remarks>
+    /// Layers, timelines, onion skinning and animation tags are the reason this editor exists,
+    /// and they are also six panels of vocabulary in front of someone who wanted to draw a
+    /// sprite. Everything switched off here is still one tick away in View, Panels, so this is
+    /// a starting point rather than a reduced edition.
+    /// </remarks>
+    public IRootDock CreateSimpleLayout() => BuildRoot(BuildSimpleShell());
+
+    /// <summary>Wraps a shell in the root dock the docking control expects.</summary>
+    private RootDock BuildRoot(IDock shell) => new()
+    {
+        Id = "Root",
+        Title = "Root",
+        IsCollapsable = false,
+        VisibleDockables = CreateList<IDockable>(shell),
+        ActiveDockable = shell,
+        DefaultDockable = shell,
+    };
+
+    /// <summary>Creates the dock that holds the document tabs.</summary>
+    private DocumentDock CreateDocumentsDock()
+    {
         DocumentDock documents = new()
         {
             Id = DocumentsDockId,
@@ -143,95 +179,133 @@ public sealed class XpDockFactory : Factory
         };
 
         DocumentDock = documents;
+        return documents;
+    }
 
-        // The left column holds the tools and the options for whichever one is chosen, which
-        // is the order they are used in: pick a tool, then set it up. The toolbox takes the
-        // smaller share because it only has to fit a grid of icons, while the brush and text
-        // panels need width for their sliders and their font list.
-        //
-        // The column is wide enough for the toolbox tab to show its own title. The first
-        // version of this layout was narrow enough that the tab strip's buttons squeezed the
-        // title off the panel entirely, which made the toolbox look broken rather than compact.
-        ToolDock leftTop = CreateToolDock(LeftTopDockId, Alignment.Left, 0.34, "Toolbox");
+    /// <summary>Builds the default arrangement of panels around the document area.</summary>
+    private ProportionalDock BuildDefaultShell()
+    {
+        _panels.Clear();
 
-        // Brush and text are tabbed together: both answer "how does the current tool behave?"
-        // and only one of them is ever relevant at a time.
-        ToolDock leftBottom = CreateToolDock(LeftBottomDockId, Alignment.Left, 0.66, "Brush", "Text");
+        DocumentDock documents = CreateDocumentsDock();
+
+        // Colour above, and given most of the column: the palette and its editor are the one
+        // panel an artist touches between every pair of strokes. Brush, text and the animation
+        // preview are tabbed together beneath it, because all three answer a question that is
+        // only sometimes being asked and only one of them at a time.
+        ToolDock leftTop = CreateToolDock(LeftTopDockId, Alignment.Left, 0.64, "Colour");
+        ToolDock leftBottom = CreateToolDock(LeftBottomDockId, Alignment.Left, 0.36, "Preview", "Text", "Brush");
 
         ProportionalDock leftColumn = new()
         {
             Id = "LeftColumn",
             Title = "LeftColumn",
             Orientation = Orientation.Vertical,
-            Proportion = 0.16,
+            Proportion = 0.13,
             VisibleDockables = CreateList<IDockable>(
                 leftTop,
                 new ProportionalDockSplitter(),
                 leftBottom),
         };
 
-        // Layers above colour, because that is the order they are reached in: pick the layer,
-        // then pick the colour to put on it.
-        ToolDock rightTop = CreateToolDock(RightTopDockId, Alignment.Right, 0.55, "Layers");
+        // The toolbox is a strip along the top of the canvas rather than a column beside it.
+        // Its contents are a row of small square icons, so height is all it needs, and every
+        // pixel of width it is not using is width the artwork gets instead.
+        ToolDock toolStrip = CreateToolDock(ToolStripDockId, Alignment.Top, 0.07, "Toolbox");
 
-        // The preview is tabbed behind the colour panel rather than given its own space: it
-        // matters intensely while animating and not at all the rest of the time, and a panel
-        // that is only sometimes wanted is what tabs are for.
-        ToolDock rightBottom = CreateToolDock(RightBottomDockId, Alignment.Right, 0.45, "Colour", "Preview");
+        // The timeline sits under the canvas and only under the canvas. A cel grid is as wide
+        // as the animation is long, so it needs the width — but running it across the whole
+        // shell would cut the side columns off short of the bottom of the window, and the
+        // layers list is the panel that most wants that height.
+        ToolDock timeline = CreateToolDock(BottomDockId, Alignment.Bottom, 0.17, "Timeline");
+
+        ProportionalDock centreColumn = new()
+        {
+            Id = CentreColumnId,
+            Title = CentreColumnId,
+            Orientation = Orientation.Vertical,
+            Proportion = 0.72,
+            VisibleDockables = CreateList<IDockable>(
+                toolStrip,
+                new ProportionalDockSplitter(),
+                documents,
+                new ProportionalDockSplitter(),
+                timeline),
+        };
+
+        // Layers above history, because that is the order they are read in: what am I drawing
+        // on, and what have I just done to it.
+        ToolDock rightTop = CreateToolDock(RightTopDockId, Alignment.Right, 0.5, "Layers");
+        ToolDock rightBottom = CreateToolDock(RightBottomDockId, Alignment.Right, 0.5, "History");
 
         ProportionalDock rightColumn = new()
         {
             Id = "RightColumn",
             Title = "RightColumn",
             Orientation = Orientation.Vertical,
-            Proportion = 0.22,
+            Proportion = 0.15,
             VisibleDockables = CreateList<IDockable>(
                 rightTop,
                 new ProportionalDockSplitter(),
                 rightBottom),
         };
 
-        ProportionalDock mainRow = new()
-        {
-            Id = "MainRow",
-            Title = "MainRow",
-            Orientation = Orientation.Horizontal,
-            Proportion = 0.74,
-            VisibleDockables = CreateList<IDockable>(
-                leftColumn,
-                new ProportionalDockSplitter(),
-                documents,
-                new ProportionalDockSplitter(),
-                rightColumn),
-        };
-
-        // The timeline spans the full width beneath everything else. It has to: a cel grid is
-        // as wide as the animation is long, and putting it in a side column would make a
-        // twenty-frame walk cycle unreadable.
-        ToolDock bottomDock = CreateToolDock(BottomDockId, Alignment.Bottom, 0.26, "Timeline");
-
-        ProportionalDock shell = new()
+        return new ProportionalDock
         {
             Id = "Shell",
             Title = "Shell",
-            Orientation = Orientation.Vertical,
+            Orientation = Orientation.Horizontal,
             VisibleDockables = CreateList<IDockable>(
-                mainRow,
+                leftColumn,
                 new ProportionalDockSplitter(),
-                bottomDock),
+                centreColumn,
+                new ProportionalDockSplitter(),
+                rightColumn),
         };
+    }
 
-        RootDock root = new()
+    /// <summary>Builds the beginner's arrangement: colour, tools and the canvas.</summary>
+    private ProportionalDock BuildSimpleShell()
+    {
+        _panels.Clear();
+
+        DocumentDock documents = CreateDocumentsDock();
+
+        ToolDock colour = CreateToolDock(LeftTopDockId, Alignment.Left, 1.0, "Colour");
+
+        ProportionalDock leftColumn = new()
         {
-            Id = "Root",
-            Title = "Root",
-            IsCollapsable = false,
-            VisibleDockables = CreateList<IDockable>(shell),
-            ActiveDockable = shell,
-            DefaultDockable = shell,
+            Id = "LeftColumn",
+            Title = "LeftColumn",
+            Orientation = Orientation.Vertical,
+            Proportion = 0.15,
+            VisibleDockables = CreateList<IDockable>(colour),
         };
 
-        return root;
+        ToolDock toolStrip = CreateToolDock(ToolStripDockId, Alignment.Top, 0.08, "Toolbox");
+
+        ProportionalDock centreColumn = new()
+        {
+            Id = CentreColumnId,
+            Title = CentreColumnId,
+            Orientation = Orientation.Vertical,
+            Proportion = 0.85,
+            VisibleDockables = CreateList<IDockable>(
+                toolStrip,
+                new ProportionalDockSplitter(),
+                documents),
+        };
+
+        return new ProportionalDock
+        {
+            Id = "Shell",
+            Title = "Shell",
+            Orientation = Orientation.Horizontal,
+            VisibleDockables = CreateList<IDockable>(
+                leftColumn,
+                new ProportionalDockSplitter(),
+                centreColumn),
+        };
     }
 
     /// <inheritdoc />

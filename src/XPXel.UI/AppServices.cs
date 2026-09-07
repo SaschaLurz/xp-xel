@@ -154,6 +154,8 @@ public static class AppServices
         // Remembers where the artist left the panels. Registered alongside the theme service
         // because both are preferences that outlive a session.
         services.AddSingleton<DockLayoutStore>();
+        services.AddSingleton<LayoutPresetStore>();
+        services.AddSingleton<ClipboardService>();
 
         // One player for the application: the timeline and the preview both drive it, and two
         // clocks would drift apart.

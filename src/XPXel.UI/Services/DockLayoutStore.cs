@@ -40,9 +40,12 @@ public sealed class DockLayoutStore
     /// Raised to 2 when the brush and text panels were added and the docks around them were
     /// rearranged, and to 3 when the timeline and preview arrived. A version 2 layout has no
     /// row beneath the document area at all, so a restored one would leave the timeline with
-    /// nowhere to live.
+    /// nowhere to live. Raised to 4 when the default arrangement was rebuilt around a toolbox
+    /// strip above the canvas and a timeline confined to the middle column: a version 3 layout
+    /// has the toolbox in a tall left column and the timeline across the whole shell, which is
+    /// a different editor to look at.
     /// </remarks>
-    private const string LayoutVersion = "3";
+    private const string LayoutVersion = "4";
 
     private const string VersionKey = "layout.version";
 
@@ -68,8 +71,7 @@ public sealed class DockLayoutStore
                 return null;
             }
 
-            string? json = _settings.GetValue(LayoutKey);
-            return string.IsNullOrWhiteSpace(json) ? null : _serializer.Deserialize<IRootDock?>(json);
+            return Deserialize(_settings.GetValue(LayoutKey));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -93,6 +95,44 @@ public sealed class DockLayoutStore
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Failing to remember the layout is not worth interrupting the artist over.
+        }
+    }
+
+    /// <summary>
+    /// Turns a layout into text, for a named preset to keep.
+    /// </summary>
+    /// <param name="layout">The layout to write out.</param>
+    /// <returns>The serialised layout, or <see langword="null"/> if it could not be written.</returns>
+    public string? Serialize(IRootDock layout)
+    {
+        ArgumentNullException.ThrowIfNull(layout);
+
+        try
+        {
+            return _serializer.Serialize(layout);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Same reasoning as everywhere else in this class: a layout is a convenience, and
+            // failing to write one down is not worth an exception reaching the artist.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads a layout back out of text written by <see cref="Serialize"/>.
+    /// </summary>
+    /// <param name="json">The serialised layout.</param>
+    /// <returns>The layout, or <see langword="null"/> if it could not be read.</returns>
+    public IRootDock? Deserialize(string? json)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(json) ? null : _serializer.Deserialize<IRootDock?>(json);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return null;
         }
     }
 

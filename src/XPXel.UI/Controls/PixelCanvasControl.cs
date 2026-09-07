@@ -47,6 +47,28 @@ namespace XPXel.UI.Controls;
 /// reached by swapping with X.
 /// </para>
 /// </remarks>
+/// <summary>What the pointer is over that can be taken hold of and dragged.</summary>
+/// <remarks>
+/// The canvas has three draggable things that are not the artwork — the edge of a selection,
+/// the crop frame, and whichever of those is currently being held — and each of them wants to
+/// say so through the cursor. Naming the states keeps that decision in one place rather than
+/// spread through the pointer handlers as a set of overlapping booleans.
+/// </remarks>
+internal enum CanvasGrab
+{
+    /// <summary>Nothing; the active tool's own cursor applies.</summary>
+    None,
+
+    /// <summary>The marching ants, or artwork already lifted: a press moves the marked pixels.</summary>
+    Marks,
+
+    /// <summary>The crop frame, which a press would take hold of.</summary>
+    Frame,
+
+    /// <summary>Something is being dragged right now.</summary>
+    Held,
+}
+
 public sealed class PixelCanvasControl : Control, IDisposable
 {
     /// <summary>The document being edited and displayed.</summary>
@@ -68,6 +90,17 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// <summary>Whether a dot of the drawing colour follows the pointer.</summary>
     public static readonly StyledProperty<bool> ShowColorSwatchProperty =
         AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowColorSwatch), defaultValue: true);
+
+    /// <summary>Whether the grey checkerboard is drawn behind the artwork to mean "nothing here".</summary>
+    /// <remarks>
+    /// On by default, because a transparent pixel and a white one are otherwise the same
+    /// picture and an artist needs to be able to tell them apart. It can be switched off
+    /// because the checks are also visual noise: fine detail drawn over them is read against a
+    /// moving pattern rather than against a flat ground, and at that point the honest answer is
+    /// to let the page background show through instead.
+    /// </remarks>
+    public static readonly StyledProperty<bool> ShowTransparencyCheckerProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowTransparencyChecker), defaultValue: true);
 
     /// <summary>How far one zoom step travels.</summary>
     public static readonly StyledProperty<double> ZoomSpeedProperty =
@@ -175,6 +208,19 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// </summary>
     private const double CropHandleSize = CropTool.GripScreenDistance;
 
+    /// <summary>
+    /// How near the marching ants the pointer must come, in screen pixels, before a press
+    /// there picks the marked pixels up rather than doing what the current tool would do.
+    /// </summary>
+    /// <remarks>
+    /// Measured on screen rather than in image pixels, for the same reason the crop grips are:
+    /// it is a question about how accurately a person can aim a mouse, and the answer does not
+    /// change with the zoom. Deliberately a little tighter than the crop grip, because the edge
+    /// of a selection runs through the middle of the artwork and every pixel it does not claim
+    /// is a pixel the artist can still draw on.
+    /// </remarks>
+    private const double SelectionGrabDistance = 5.0;
+
     private DocumentRenderTarget? _renderTarget;
 
     /// <summary>
@@ -225,6 +271,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
     private ToolPointerButton _activeButton = ToolPointerButton.None;
     private bool _isPanning;
+
+    /// <summary>What a press at the pointer's current position would take hold of.</summary>
+    /// <remarks>
+    /// Recomputed on every pointer move and reflected in the cursor, so that the answer to
+    /// "can I drag this?" is given before the artist commits to finding out.
+    /// </remarks>
+    private CanvasGrab _grab = CanvasGrab.None;
 
     /// <summary>
     /// Whether holding space has put the canvas into pan mode, so that the left button
@@ -336,6 +389,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
     {
         get => GetValue(ShowColorSwatchProperty);
         set => SetValue(ShowColorSwatchProperty, value);
+    }
+
+    /// <summary>Whether the grey checkerboard is drawn behind the artwork.</summary>
+    public bool ShowTransparencyChecker
+    {
+        get => GetValue(ShowTransparencyCheckerProperty);
+        set => SetValue(ShowTransparencyCheckerProperty, value);
     }
 
     /// <summary>
@@ -545,9 +605,14 @@ public sealed class PixelCanvasControl : Control, IDisposable
             ? frame.Union(workspace.Document.Bounds)
             : workspace.Document.Bounds;
 
-        Rect extentRect = _transform.GetPixelRect(extent);
+        // While cropping, the ground is ruled right across the window rather than stopping at
+        // the frame. Every pixel out there is somewhere the frame could be dragged to, and a
+        // frame edge that runs into blank shell background looks like the end of the world
+        // rather than like the edge of a choice. The shade drawn over it a moment later is what
+        // makes it read as "outside", which is the arrangement Photoshop and the rest settled on.
+        ImageRect ground = cropFrame is not null ? GetViewportBounds().Union(extent) : extent;
 
-        DrawCheckerboard(context, extentRect);
+        DrawCheckerboard(context, _transform.GetPixelRect(ground));
         DrawOverscan(context, workspace, extent);
 
         WriteableBitmap bitmap = _renderTarget.GetBitmap(
@@ -557,7 +622,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             workspace.ActiveTag);
         context.DrawImage(bitmap, new Rect(bitmap.Size), documentRect);
 
-        DrawPixelGrid(context, extent, extentRect, viewport);
+        DrawPixelGrid(context, ground, _transform.GetPixelRect(ground), viewport);
         DrawDocumentBorder(context, documentRect);
 
         // Overlays go on top of the artwork and of each other in the order an artist reads
@@ -649,7 +714,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _checkerboardBrush = null;
             InvalidateVisual();
         }
-        else if (change.Property == ShowPixelGridProperty)
+        else if (change.Property == ShowPixelGridProperty || change.Property == ShowTransparencyCheckerProperty)
         {
             InvalidateVisual();
         }
@@ -979,6 +1044,25 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        // Something grabbable under the pointer outranks the tool's own cursor, because it
+        // outranks the tool: a press there will drag that thing rather than draw. An open hand
+        // over the crop frame, the four-way arrow over marked pixels and over anything actually
+        // being held — which is as close to "grabbing" as the platforms agree on.
+        switch (_grab)
+        {
+            case CanvasGrab.Frame:
+                Cursor = new Cursor(StandardCursorType.Hand);
+                return;
+
+            case CanvasGrab.Marks:
+            case CanvasGrab.Held:
+                Cursor = new Cursor(StandardCursorType.SizeAll);
+                return;
+
+            default:
+                break;
+        }
+
         // A selection tool says what its modifiers will do, which takes precedence over its
         // plain crosshair; no tool both marks pixels and draws with a colour, so the sign and
         // the colour dot can never contend for the same corner.
@@ -1010,6 +1094,122 @@ public sealed class PixelCanvasControl : Control, IDisposable
     }
 
     /// <summary>
+    /// Works out what a press at a point would take hold of, and repaints the cursor if the
+    /// answer has changed.
+    /// </summary>
+    /// <param name="position">Where the pointer is, in view space, or <see langword="null"/> if it has left.</param>
+    /// <remarks>
+    /// Nothing is grabbable while a drag is already under way, apart from the drag itself:
+    /// asking again mid-gesture would flicker the cursor between what is being held and
+    /// whatever it happens to be passing over.
+    /// </remarks>
+    private void UpdateGrab(Point? position)
+    {
+        CanvasGrab grab = GetGrab(position);
+
+        if (_grab == grab)
+        {
+            return;
+        }
+
+        _grab = grab;
+        UpdateCursor();
+    }
+
+    /// <summary>Answers what is under the pointer, without changing anything.</summary>
+    private CanvasGrab GetGrab(Point? position)
+    {
+        if (_isDraggingTransform || (ActiveTool is CropTool { IsDragging: true }))
+        {
+            return CanvasGrab.Held;
+        }
+
+        if (position is not { } point || _isPanning || _activeButton != ToolPointerButton.None)
+        {
+            return CanvasGrab.None;
+        }
+
+        // Artwork already lifted is in the artist's hand wherever the pointer is, so the whole
+        // canvas is a place to put it down or pick the drag up again.
+        if (_observedWorkspace?.ActiveTransform is not null)
+        {
+            return CanvasGrab.Marks;
+        }
+
+        if (ActiveTool is CropTool crop && ToolContext is { } context && _observedOverlay?.CropFrame is not null)
+        {
+            return crop.HitTest(context, _transform.ToImagePoint(point)) == CropGrip.None
+                ? CanvasGrab.None
+                : CanvasGrab.Frame;
+        }
+
+        // A crop frame in play owns the canvas; the branch above has already answered for it.
+        return _observedOverlay?.CropFrame is null && IsOnSelectionEdge(point)
+            ? CanvasGrab.Marks
+            : CanvasGrab.None;
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether a point is close enough to the marching ants to take
+    /// hold of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The traced outline, not the bounding box. A selection made with the wand or the pixel
+    /// tool is whatever shape the artist marked, and offering a grab handle along a rectangle
+    /// they never drew would be a promise about the wrong edge.
+    /// </para>
+    /// <para>
+    /// Holding Shift or Control means the artist is editing the selection rather than moving
+    /// it — those are the add and subtract modifiers on every selection tool — so the edge stops
+    /// being a handle for as long as one of them is down.
+    /// </para>
+    /// </remarks>
+    private bool IsOnSelectionEdge(Point point)
+    {
+        if (_observedWorkspace is not { Selection: { IsEmpty: false } selection }
+            || _modifiers.HasFlag(KeyModifiers.Shift)
+            || _modifiers.HasFlag(KeyModifiers.Control))
+        {
+            return false;
+        }
+
+        _selectionOutline ??= SelectionOutline.Trace(selection);
+
+        foreach (SelectionOutline.Segment segment in _selectionOutline)
+        {
+            Point start = ToViewPoint(segment.Start, ImagePoint.Origin);
+            Point end = ToViewPoint(segment.End, ImagePoint.Origin);
+
+            if (DistanceToSegment(point, start, end) <= SelectionGrabDistance)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The shortest distance from a point to a line segment, in view space.</summary>
+    private static double DistanceToSegment(Point point, Point start, Point end)
+    {
+        double dx = end.X - start.X;
+        double dy = end.Y - start.Y;
+        double lengthSquared = (dx * dx) + (dy * dy);
+
+        // A degenerate segment is a point, and the projection below would divide by zero.
+        double t = lengthSquared <= double.Epsilon
+            ? 0.0
+            : Math.Clamp((((point.X - start.X) * dx) + ((point.Y - start.Y) * dy)) / lengthSquared, 0.0, 1.0);
+
+        double nearestX = start.X + (t * dx);
+        double nearestY = start.Y + (t * dy);
+
+        return Math.Sqrt(((point.X - nearestX) * (point.X - nearestX))
+            + ((point.Y - nearestY) * (point.Y - nearestY)));
+    }
+
+    /// <summary>
     /// Records the modifier keys and repaints the cursor if what they mean has changed.
     /// </summary>
     /// <remarks>
@@ -1031,6 +1231,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             UpdateCursor();
         }
+
+        // Shift and Control also turn the selection edge from a handle back into an edge, so
+        // the grab has to be asked again whichever way the modifiers moved.
+        UpdateGrab(_pointerPosition);
     }
 
     /// <summary>
@@ -1130,6 +1334,39 @@ public sealed class PixelCanvasControl : Control, IDisposable
             BeginTransformDrag(position);
             e.Pointer.Capture(this);
             e.Handled = true;
+            UpdateGrab(position);
+            return;
+        }
+
+        // A press on the marching ants picks up what they mark, whichever tool is in hand. The
+        // cursor has been promising this for as long as the pointer has been on the edge, and
+        // the alternative — reaching for the move tool first — puts a trip to the toolbox in
+        // the middle of a gesture the artist has already begun. Only the edge does it: the
+        // inside of a selection is where the drawing happens, and a pencil that refused to
+        // draw there would be a far worse trade.
+        if (_observedOverlay?.CropFrame is null
+            && IsOnSelectionEdge(position)
+            && _observedWorkspace is { } marked
+            && marked.BeginTransform())
+        {
+            BeginTransformDrag(position);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            UpdateGrab(position);
+            return;
+        }
+
+        // Clicking the empty space beside the picture puts the selection down, the way clicking
+        // away from something deselects it everywhere else. It is the gesture artists reach for
+        // first and, until now, the one thing that did not work — leaving the marching ants on
+        // screen with no obvious way to be rid of them. Skipped while a crop frame is up, where
+        // a press outside the picture is how a new frame is drawn.
+        if (_observedOverlay?.CropFrame is null
+            && _observedWorkspace is { Selection: { IsEmpty: false } } outside
+            && !outside.Document.Bounds.Contains(_transform.ToImagePoint(position)))
+        {
+            outside.Selection = null;
+            e.Handled = true;
             return;
         }
 
@@ -1159,6 +1396,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             BeginTransformDrag(position);
         }
 
+        UpdateGrab(position);
         e.Handled = true;
     }
 
@@ -1170,6 +1408,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         Point position = e.GetPosition(this);
         UpdateHoveredPixel(position);
         TrackModifiers(e.KeyModifiers);
+        UpdateGrab(position);
 
         if (_isPanning)
         {
@@ -1216,6 +1455,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             _isDraggingTransform = false;
             e.Pointer.Capture(null);
             e.Handled = true;
+            UpdateGrab(e.GetPosition(this));
             return;
         }
 
@@ -1227,6 +1467,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         _activeButton = ToolPointerButton.None;
         e.Pointer.Capture(null);
+
+        // The hand opens again here: the tool has just let go of whatever it was holding, and
+        // the pointer is very likely still over it.
+        UpdateGrab(e.GetPosition(this));
     }
 
     /// <inheritdoc />
@@ -1248,6 +1492,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // and the artist has not said where to put them.
         _isDraggingTransform = false;
 
+        UpdateGrab(_pointerPosition);
         UpdateCursor();
     }
 
@@ -1255,6 +1500,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
+
+        UpdateGrab(null);
 
         if (_hoveredPixel is not null)
         {
@@ -1355,8 +1602,29 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// </remarks>
     private void DrawCheckerboard(DrawingContext context, Rect area)
     {
+        // Switched off, the canvas background shows through instead. Nothing is drawn in its
+        // place: a flat fill of some other colour would be a claim that those pixels are that
+        // colour, which is the one thing the checkerboard exists to deny.
+        if (!ShowTransparencyChecker)
+        {
+            return;
+        }
+
         _checkerboardBrush ??= CreateCheckerboardBrush();
         context.FillRectangle(_checkerboardBrush, area);
+    }
+
+    /// <summary>The part of the image plane the viewport currently covers, in whole pixels.</summary>
+    /// <remarks>
+    /// Rounded outwards, so the region it describes reaches the window edges rather than
+    /// stopping a fraction of a pixel short of them and leaving a hairline of bare background.
+    /// </remarks>
+    private ImageRect GetViewportBounds()
+    {
+        ImagePoint topLeft = _transform.ToImagePoint(new Point(0, 0));
+        ImagePoint bottomRight = _transform.ToImagePoint(new Point(_viewport.Width, _viewport.Height));
+
+        return ImageRect.FromEdges(topLeft.X, topLeft.Y, bottomRight.X + 1, bottomRight.Y + 1);
     }
 
     /// <summary>
@@ -1413,10 +1681,11 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// <summary>Rules the pixel grid over an area of the canvas.</summary>
     /// <remarks>
     /// <para>
-    /// The area is the document, or the document and the crop frame together while one is up.
-    /// Ruling the grid across the empty space the frame has been dragged into is what says that
-    /// the space is made of pixels and can be kept — without it, dragging a frame outwards looks
-    /// like dragging it into nothing.
+    /// The area is the document, or the whole window while a crop frame is up. Ruling the grid
+    /// across the empty space the frame can be dragged into is what says that the space is made
+    /// of pixels and can be kept — without it, dragging a frame outwards looks like dragging it
+    /// into nothing. Only the lines that fall inside the viewport are ever emitted, so the
+    /// larger area costs nothing.
     /// </para>
     /// <para>
     /// The grid is forced on for the same reason while the crop frame is up, whatever the View
@@ -1606,10 +1875,22 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// </remarks>
     private void DrawSelection(DrawingContext context, SelectionMask? selection)
     {
-        if (selection is null
-            || selection.IsEmpty
-            || HighlightBrush is not { } bright
-            || HighlightShadowBrush is not { } dark)
+        if (HighlightBrush is not { } bright || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        // A clip in the air is outlined by itself, and whatever was marked before it arrived is
+        // not drawn at all. Nothing else would say the pasted pixels are still in the artist's
+        // hand, and the old marquee is about to be replaced by this one anyway — showing it in
+        // the meantime points at the wrong pixels.
+        if (_observedWorkspace?.ActiveTransform is { MovesTheSelection: false } floating)
+        {
+            DrawMarchingAnts(context, _transform.GetPixelRect(floating.Bounds), dark, bright);
+            return;
+        }
+
+        if (selection is null or { IsEmpty: true })
         {
             return;
         }

@@ -4,6 +4,37 @@ using XPXel.Core.Primitives;
 namespace XPXel.Core.Tools;
 
 /// <summary>
+/// Which part of a crop frame a point is over.
+/// </summary>
+/// <remarks>
+/// Public because the canvas asks the tool this on every pointer move, so that the pointer can
+/// say whether there is anything to take hold of before the artist presses. The edges combine —
+/// <c>Left | Top</c> is the top-left corner — and <see cref="All"/> is the inside of the frame,
+/// which drags the whole thing.
+/// </remarks>
+[Flags]
+public enum CropGrip
+{
+    /// <summary>The point is outside the frame and not near an edge.</summary>
+    None = 0,
+
+    /// <summary>The left edge.</summary>
+    Left = 1,
+
+    /// <summary>The right edge.</summary>
+    Right = 2,
+
+    /// <summary>The top edge.</summary>
+    Top = 4,
+
+    /// <summary>The bottom edge.</summary>
+    Bottom = 8,
+
+    /// <summary>Inside the frame, which moves all four edges together.</summary>
+    All = Left | Right | Top | Bottom,
+}
+
+/// <summary>
 /// Puts a frame around the picture that can be dragged in to trim it or out to enlarge it,
 /// and applies it on Enter.
 /// </summary>
@@ -48,22 +79,10 @@ public sealed class CropTool : ITool, IInteractiveTool
     /// </remarks>
     public const double GripScreenDistance = 7.0;
 
-    /// <summary>Which part of the frame a drag is moving.</summary>
-    [Flags]
-    private enum Grip
-    {
-        None = 0,
-        Left = 1,
-        Right = 2,
-        Top = 4,
-        Bottom = 8,
-        All = Left | Right | Top | Bottom,
-    }
-
     private ImageRect _frame;
     private ImageRect _dragStart;
     private ImagePoint _anchor;
-    private Grip _grip;
+    private CropGrip _grip;
     private bool _isDragging;
 
     /// <inheritdoc />
@@ -75,6 +94,29 @@ public sealed class CropTool : ITool, IInteractiveTool
     /// <inheritdoc />
     public string Description =>
         "Drag the frame's handles to trim the picture or to make it bigger, then press Enter. Escape puts the frame back.";
+
+    /// <summary>Gets a value indicating whether the frame is being dragged right now.</summary>
+    /// <remarks>
+    /// Read by the canvas, which closes the pointer's hand while a drag is under way and opens
+    /// it again on release. A grab that looks the same held as hovering says nothing about
+    /// whether the press was actually taken.
+    /// </remarks>
+    public bool IsDragging => _isDragging;
+
+    /// <summary>Reports what a point is over, without touching the frame.</summary>
+    /// <param name="context">The document being acted on, for the zoom the tolerance is measured in.</param>
+    /// <param name="point">The point to test, in image coordinates.</param>
+    /// <returns>The part of the frame that a press there would take hold of.</returns>
+    /// <remarks>
+    /// This is the same question <see cref="OnPointerPressed"/> asks, asked a moment earlier and
+    /// with no side effects, so that the pointer can promise exactly what the press will do.
+    /// </remarks>
+    public CropGrip HitTest(ToolContext context, ImagePoint point)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        return _frame.IsEmpty ? CropGrip.None : GetGrip(point, GetTolerance(context));
+    }
 
     /// <inheritdoc />
     public void OnActivated(ToolContext context)
@@ -138,12 +180,12 @@ public sealed class CropTool : ITool, IInteractiveTool
         _dragStart = _frame;
         _isDragging = true;
 
-        if (_grip == Grip.None)
+        if (_grip == CropGrip.None)
         {
             // Nowhere near the frame and not inside it: the artist is drawing a new one.
             _frame = new ImageRect(e.Position.X, e.Position.Y, 0, 0);
             _dragStart = _frame;
-            _grip = Grip.Right | Grip.Bottom;
+            _grip = CropGrip.Right | CropGrip.Bottom;
         }
 
         context.Overlay.CropFrame = _frame;
@@ -163,7 +205,7 @@ public sealed class CropTool : ITool, IInteractiveTool
         int dx = e.Position.X - _anchor.X;
         int dy = e.Position.Y - _anchor.Y;
 
-        _frame = _grip == Grip.All
+        _frame = _grip == CropGrip.All
             ? _dragStart.Translate(dx, dy)
             : Resize(_dragStart, _grip, dx, dy);
 
@@ -222,7 +264,7 @@ public sealed class CropTool : ITool, IInteractiveTool
         Math.Max(1, (int)Math.Round(GripScreenDistance / Math.Max(context.ViewScale, 0.01)));
 
     /// <summary>Works out what a press at a point is asking to drag.</summary>
-    private Grip GetGrip(ImagePoint point, int tolerance)
+    private CropGrip GetGrip(ImagePoint point, int tolerance)
     {
         bool nearLeft = Math.Abs(point.X - _frame.Left) <= tolerance;
         bool nearRight = Math.Abs(point.X - _frame.Right) <= tolerance;
@@ -232,37 +274,37 @@ public sealed class CropTool : ITool, IInteractiveTool
         bool withinRows = point.Y >= _frame.Top - tolerance && point.Y <= _frame.Bottom + tolerance;
         bool withinColumns = point.X >= _frame.Left - tolerance && point.X <= _frame.Right + tolerance;
 
-        Grip grip = Grip.None;
+        CropGrip grip = CropGrip.None;
 
         if (nearLeft && withinRows)
         {
-            grip |= Grip.Left;
+            grip |= CropGrip.Left;
         }
         else if (nearRight && withinRows)
         {
-            grip |= Grip.Right;
+            grip |= CropGrip.Right;
         }
 
         if (nearTop && withinColumns)
         {
-            grip |= Grip.Top;
+            grip |= CropGrip.Top;
         }
         else if (nearBottom && withinColumns)
         {
-            grip |= Grip.Bottom;
+            grip |= CropGrip.Bottom;
         }
 
         // Not on an edge, but inside: the whole frame moves.
-        return grip == Grip.None && _frame.Contains(point) ? Grip.All : grip;
+        return grip == CropGrip.None && _frame.Contains(point) ? CropGrip.All : grip;
     }
 
     /// <summary>Moves the gripped edges of a frame, keeping it the right way out.</summary>
-    private static ImageRect Resize(ImageRect frame, Grip grip, int dx, int dy)
+    private static ImageRect Resize(ImageRect frame, CropGrip grip, int dx, int dy)
     {
-        int left = frame.Left + (grip.HasFlag(Grip.Left) ? dx : 0);
-        int right = frame.Right + (grip.HasFlag(Grip.Right) ? dx : 0);
-        int top = frame.Top + (grip.HasFlag(Grip.Top) ? dy : 0);
-        int bottom = frame.Bottom + (grip.HasFlag(Grip.Bottom) ? dy : 0);
+        int left = frame.Left + (grip.HasFlag(CropGrip.Left) ? dx : 0);
+        int right = frame.Right + (grip.HasFlag(CropGrip.Right) ? dx : 0);
+        int top = frame.Top + (grip.HasFlag(CropGrip.Top) ? dy : 0);
+        int bottom = frame.Bottom + (grip.HasFlag(CropGrip.Bottom) ? dy : 0);
 
         // Dragging an edge past its opposite flips the frame rather than inverting it, which
         // is what every other rectangle drag in the application does.

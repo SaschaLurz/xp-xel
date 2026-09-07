@@ -1,0 +1,45 @@
+<!--
+  Names the arrangement about to be saved.
+
+  Reusing a name is allowed rather than blocked: typing the name of an existing layout is how
+  an artist says "update that one". The warning below the box says so, so nothing is replaced
+  by surprise.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             x:Class="XPXel.UI.Views.SaveLayoutDialogView"
+             x:DataType="dialogs:SaveLayoutDialogViewModel">
+
+  <Border Classes="dialogSurface">
+    <StackPanel Spacing="14">
+
+      <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+
+      <StackPanel Spacing="4">
+        <TextBlock Text="Name" Classes="subtle" />
+        <TextBox Text="{Binding Name, Mode=TwoWay}"
+                 PlaceholderText="Drawing"
+                 ToolTip.Tip="What this arrangement of panels will be called in the View menu" />
+      </StackPanel>
+
+      <TextBlock Text="{Binding Warning}"
+                 IsVisible="{Binding HasWarning}"
+                 Foreground="{DynamicResource XpAccentBrush}"
+                 FontSize="11"
+                 TextWrapping="Wrap" />
+
+      <TextBlock Text="The panels on screen now — where they are, how wide they are, and which are switched off — are what gets saved."
+                 Classes="subtle"
+                 FontSize="11"
+                 TextWrapping="Wrap" />
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" />
+        <Button Content="Save" IsDefault="True" Command="{Binding ConfirmCommand}" />
+      </StackPanel>
+
+    </StackPanel>
+  </Border>
+
+</UserControl>

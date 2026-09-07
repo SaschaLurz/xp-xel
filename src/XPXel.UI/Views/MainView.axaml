@@ -46,7 +46,11 @@
     <!-- The bare-key shortcuts - X to swap colours, and one letter per tool - are handled in
          code-behind rather than declared here. A KeyBinding fires wherever the key is
          pressed, so binding "X" would swap the drawing colours in the middle of renaming a
-         layer to "Axe". The code-behind checks first that nothing is being typed into. -->
+         layer to "Axe". The code-behind checks first that nothing is being typed into.
+
+         Ctrl+C, Ctrl+X and Ctrl+V are there for the same reason and a sharper one: a text box
+         has its own meaning for all three, and stealing them would make it impossible to paste
+         a name into the layers panel. -->
   </UserControl.KeyBindings>
 
   <Grid Background="{DynamicResource XpAppBackgroundBrush}">
@@ -79,6 +83,17 @@
           <MenuItem Header="_Undo" InputGesture="Ctrl+Z" Command="{Binding UndoCommand}" />
           <MenuItem Header="_Redo" InputGesture="Ctrl+Y" Command="{Binding RedoCommand}" />
           <Separator />
+          <MenuItem Header="Cu_t" InputGesture="Ctrl+X" Command="{Binding CutCommand}"
+                    ToolTip.Tip="Copy what is marked and clear it" />
+          <MenuItem Header="_Copy" InputGesture="Ctrl+C" Command="{Binding CopyCommand}"
+                    ToolTip.Tip="Copy what is marked, both for XP-xel and for other programs" />
+          <MenuItem Header="_Paste" InputGesture="Ctrl+V" Command="{Binding PasteCommand}"
+                    ToolTip.Tip="Paste pixels, an image from another program, or text as a text layer" />
+          <Separator />
+          <MenuItem Header="_Erase Marked Pixels" InputGesture="Delete"
+                    Command="{Binding EraseSelectionCommand}"
+                    ToolTip.Tip="Clear what is marked on the active layer. Backspace does the same" />
+          <Separator />
           <MenuItem Header="S_wap Colours" InputGesture="X" Command="{Binding SwapColorsCommand}" />
         </MenuItem>
 
@@ -89,7 +104,8 @@
 
         <MenuItem Header="_Select">
           <MenuItem Header="Select _All" InputGesture="Ctrl+A" Command="{Binding SelectAllCommand}" />
-          <MenuItem Header="_Deselect" InputGesture="Ctrl+D" Command="{Binding DeselectCommand}" />
+          <MenuItem Header="_Deselect" InputGesture="Ctrl+D" Command="{Binding DeselectCommand}"
+                    ToolTip.Tip="Escape does the same, as does clicking the empty space beside the picture" />
           <MenuItem Header="_Invert Selection" InputGesture="Ctrl+Shift+I" Command="{Binding InvertSelectionCommand}" />
           <Separator />
           <MenuItem Header="_Move Selected Pixels" InputGesture="Ctrl+T"
@@ -143,6 +159,10 @@
           <MenuItem Header="Show _Rulers"
                     ToggleType="CheckBox"
                     IsChecked="{Binding CanvasSettings.ShowRulers, Mode=TwoWay}" />
+          <MenuItem Header="Show _Transparency Checks"
+                    ToggleType="CheckBox"
+                    IsChecked="{Binding CanvasSettings.ShowTransparencyChecker, Mode=TwoWay}"
+                    ToolTip.Tip="The grey chequered pattern behind the artwork, which marks the pixels that are not painted at all" />
           <MenuItem Header="Show Colour by the C_ursor"
                     ToggleType="CheckBox"
                     IsChecked="{Binding CanvasSettings.ShowColorSwatchCursor, Mode=TwoWay}" />
@@ -162,6 +182,22 @@
               </ControlTheme>
             </MenuItem.ItemContainerTheme>
           </MenuItem>
+          <!-- The layouts an artist can move between: the two the editor ships with, then
+               whatever they have saved. Driven by one list on the view model, so a layout saved
+               a moment ago is in this menu without anything here changing. -->
+          <MenuItem Header="_Layouts" ItemsSource="{Binding Layouts}">
+            <MenuItem.ItemContainerTheme>
+              <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}"
+                            x:DataType="vm:LayoutEntryViewModel">
+                <Setter Property="Header" Value="{Binding Name}" />
+                <Setter Property="Command" Value="{Binding ApplyCommand}" />
+              </ControlTheme>
+            </MenuItem.ItemContainerTheme>
+          </MenuItem>
+          <MenuItem Header="_Save Current Layout…" Command="{Binding SaveLayoutAsCommand}"
+                    ToolTip.Tip="Keep the panels as they are now under a name, to come back to later" />
+          <MenuItem Header="_Manage Layouts…" Command="{Binding ManageLayoutsCommand}"
+                    ToolTip.Tip="Rename, reorder and remove the layouts you have saved" />
           <MenuItem Header="Reset to _Default Layout" Command="{Binding ResetLayoutCommand}" />
           <Separator />
           <MenuItem Header="_Theme">
@@ -240,6 +276,10 @@
                         IsChecked="{Binding CanvasSettings.ShowPixelGrid, Mode=TwoWay}"
                         VerticalAlignment="Center"
                         ToolTip.Tip="Draw the one-pixel grid over the artwork. Turn it off to see the image as it will be exported" />
+              <CheckBox Content="Checks"
+                        IsChecked="{Binding CanvasSettings.ShowTransparencyChecker, Mode=TwoWay}"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="The grey chequered pattern behind the artwork, which marks the pixels that are not painted at all. Turn it off for a plain background" />
 
               <TextBlock Text="Zoom speed" Classes="subtle" VerticalAlignment="Center" Margin="8,0,0,0" />
               <Slider Width="90"
