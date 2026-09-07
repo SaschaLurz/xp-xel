@@ -56,6 +56,15 @@ namespace XPXel.UI.Controls;
 /// </remarks>
 internal enum CanvasGrab
 {
+    /// <summary>An edge or corner of a free transform box, which resizes it.</summary>
+    BoxEdge = 100,
+
+    /// <summary>The body of a free transform box, which moves it.</summary>
+    BoxBody = 101,
+
+    /// <summary>The border of the text block being edited, which moves the words.</summary>
+    TextEdge = 102,
+
     /// <summary>Nothing; the active tool's own cursor applies.</summary>
     None,
 
@@ -99,6 +108,18 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// moving pattern rather than against a flat ground, and at that point the honest answer is
     /// to let the page background show through instead.
     /// </remarks>
+    /// <summary>
+    /// Whether the check pattern is also laid over the artwork itself.
+    /// </summary>
+    /// <remarks>
+    /// A second, separate pattern from the one behind the picture, and off by default. It is
+    /// masked to the pixels that actually carry paint, so empty canvas is left to the
+    /// background pattern alone, and it is drawn faintly enough to read as a texture over the
+    /// colours rather than instead of them.
+    /// </remarks>
+    public static readonly StyledProperty<bool> ShowArtworkCheckerProperty =
+        AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowArtworkChecker));
+
     public static readonly StyledProperty<bool> ShowTransparencyCheckerProperty =
         AvaloniaProperty.Register<PixelCanvasControl, bool>(nameof(ShowTransparencyChecker), defaultValue: true);
 
@@ -187,6 +208,16 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// <summary>The checkerboard square size in screen pixels; fixed so it never appears to zoom.</summary>
     private const double CheckerboardSquareSize = 8.0;
 
+    /// <summary>
+    /// How strongly the artwork check pattern is laid over the picture.
+    /// </summary>
+    /// <remarks>
+    /// Far short of opaque. The pattern is meant to sit on the artwork as a texture, and at
+    /// full strength it would simply replace the colours it covers - which is a pattern, not a
+    /// drawing with a pattern on it.
+    /// </remarks>
+    private const double ArtworkCheckerOpacity = 0.4;
+
     /// <summary>The dash pattern used for the selection and marquee outlines.</summary>
     /// <remarks>
     /// Expressed in multiples of the pen width, so the dashes stay the same size on screen
@@ -201,6 +232,12 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// shade would be the one thing that fails to.
     /// </summary>
     private static readonly IBrush CropShade = new ImmutableSolidColorBrush(Color.FromArgb(110, 0, 0, 0));
+
+    /// <summary>
+    /// The wash behind selected characters. Translucent, because it goes over glyphs that are
+    /// already drawn and has to leave them readable.
+    /// </summary>
+    private static readonly IBrush TextSelectionFill = new ImmutableSolidColorBrush(Color.FromArgb(90, 90, 150, 255));
 
     /// <summary>
     /// The size of a crop handle in screen pixels, matched to the distance at which the tool
@@ -324,6 +361,20 @@ public sealed class PixelCanvasControl : Control, IDisposable
     private bool _isDraggingTransform;
 
     /// <summary>
+    /// Which part of the crop frame or the transform box the pointer is over, kept beside
+    /// <see cref="_grab"/> because the cursor for an edge depends on <em>which</em> edge.
+    /// </summary>
+    private CropGrip _cropGrip = CropGrip.None;
+    private TransformGrip _boxGrip = TransformGrip.None;
+
+    /// <summary>
+    /// The transform box drag in progress: which grip is held, and where the pointer went down.
+    /// </summary>
+    private TransformGrip _draggingBoxGrip = TransformGrip.None;
+    private ImagePoint _boxGrabPoint;
+    private bool _isDraggingBox;
+
+    /// <summary>
     /// The cursor currently carrying the drawing colour, and the colour it carries. Owned by
     /// this control — one canvas wears one cursor — and replaced when the colour changes.
     /// </summary>
@@ -416,6 +467,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
     }
 
     /// <summary>The lighter square of the transparency checkerboard.</summary>
+    /// <summary>Whether the check pattern is also laid over the drawn pixels.</summary>
+    public bool ShowArtworkChecker
+    {
+        get => GetValue(ShowArtworkCheckerProperty);
+        set => SetValue(ShowArtworkCheckerProperty, value);
+    }
+
     public Color CheckerboardLight
     {
         get => GetValue(CheckerboardLightProperty);
@@ -466,6 +524,16 @@ public sealed class PixelCanvasControl : Control, IDisposable
         get => GetValue(HighlightShadowBrushProperty);
         set => SetValue(HighlightShadowBrushProperty, value);
     }
+
+    /// <summary>
+    /// Raised when something on the canvas needs a different tool in hand.
+    /// </summary>
+    /// <remarks>
+    /// Double-clicking text is the only thing that raises it so far. The canvas cannot pick a
+    /// tool itself - it is given one, and knows nothing about the toolbox - so it says which
+    /// tool the gesture needs and the document view, which knows both, does the picking.
+    /// </remarks>
+    public event EventHandler<string>? ToolRequested;
 
     /// <summary>
     /// Gets a value indicating whether text is currently being typed on this canvas.
@@ -621,6 +689,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
             OnionSkin,
             workspace.ActiveTag);
         context.DrawImage(bitmap, new Rect(bitmap.Size), documentRect);
+        DrawArtworkChecker(context, bitmap, documentRect);
 
         DrawPixelGrid(context, ground, _transform.GetPixelRect(ground), viewport);
         DrawDocumentBorder(context, documentRect);
@@ -630,8 +699,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // where the pointer is about to act.
         DrawSelection(context, workspace.Selection);
         DrawMarquee(context);
+        DrawTransformBox(context);
         DrawCropFrame(context, cropFrame, viewport);
         DrawHoverHighlight(context);
+        DrawTextBox(context);
         DrawTextCaret(context);
     }
 
@@ -709,6 +780,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             ObserveOnionSkin(change.GetNewValue<OnionSkinSettings?>());
         }
+        else if (change.Property == ShowArtworkCheckerProperty)
+        {
+            InvalidateVisual();
+        }
         else if (change.Property == CheckerboardLightProperty || change.Property == CheckerboardDarkProperty)
         {
             _checkerboardBrush = null;
@@ -764,10 +839,28 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         TrackModifiers(e.KeyModifiers);
 
+        // Ctrl+A inside text selects the words, not the canvas. It is caught before the
+        // shell's key binding can fire, which is the only way to have one shortcut mean two
+        // things depending on where the artist is working.
+        if (_observedWorkspace?.ActiveTextEdit is { } typing
+            && e.Key == Key.A
+            && e.KeyModifiers == KeyModifiers.Control)
+        {
+            typing.SelectAll();
+            e.Handled = true;
+            return;
+        }
+
         // Typing wins over every bare shortcut. Marking the key handled is what stops it
         // reaching the shell's key bindings, where "x" swaps the drawing colours — which is
         // not what an artist typing the word "next" is asking for.
         if (_observedWorkspace?.ActiveTextEdit is { } editing && HandleTextEditKey(editing, e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (_observedWorkspace?.ActiveFreeTransform is not null && HandleFreeTransformKey(e))
         {
             e.Handled = true;
             return;
@@ -844,6 +937,205 @@ public sealed class PixelCanvasControl : Control, IDisposable
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Applies a keystroke to the transform box.
+    /// </summary>
+    /// <returns><see langword="true"/> if the key belonged to the box.</returns>
+    /// <remarks>
+    /// The letters are bare rather than modified, and they shadow the tool shortcuts for as long
+    /// as the box is up. That is the right trade: while a transform is in progress the artist is
+    /// not choosing tools, and R for rotate and H and V for the two flips are what every editor
+    /// that has a transform box uses. A key held with Control never belongs here, so Ctrl+Z
+    /// still undoes and Ctrl+T still applies the box.
+    /// </remarks>
+    private bool HandleFreeTransformKey(KeyEventArgs e)
+    {
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta))
+        {
+            return false;
+        }
+
+        if (_observedWorkspace is not { ActiveFreeTransform: { } box } workspace)
+        {
+            return false;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                workspace.CancelFreeTransform();
+                return true;
+
+            case Key.Enter:
+                workspace.CommitFreeTransform();
+                return true;
+
+            case Key.Left:
+                box.MoveBy(-1, 0);
+                return true;
+
+            case Key.Right:
+                box.MoveBy(1, 0);
+                return true;
+
+            case Key.Up:
+                box.MoveBy(0, -1);
+                return true;
+
+            case Key.Down:
+                box.MoveBy(0, 1);
+                return true;
+
+            case Key.R:
+                box.Rotate(!e.KeyModifiers.HasFlag(KeyModifiers.Shift));
+                return true;
+
+            case Key.H:
+                box.Flip(horizontally: true);
+                return true;
+
+            case Key.V:
+                box.Flip(horizontally: false);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Takes hold of the transform box, so a drag moves or resizes it.</summary>
+    private void BeginBoxDrag(FreeTransform box, TransformGrip grip, Point position)
+    {
+        _isDraggingBox = true;
+        _draggingBoxGrip = grip;
+        _boxGrabPoint = _transform.ToImagePoint(position);
+        _pointerPosition = position;
+
+        box.BeginDrag();
+    }
+
+    /// <summary>Moves or resizes the transform box to follow the pointer.</summary>
+    /// <remarks>
+    /// Measured from the box as it was when the press landed rather than from the last pointer
+    /// sample, which is what lets a handle be dragged past its opposite edge and back again
+    /// without the artwork flipping once per pointer sample on the way.
+    /// </remarks>
+    private void DragBox(Point position)
+    {
+        if (_observedWorkspace?.ActiveFreeTransform is not { } box)
+        {
+            _isDraggingBox = false;
+            return;
+        }
+
+        ImagePoint now = _transform.ToImagePoint(position);
+        ImageRect start = box.DragBounds;
+
+        int dx = now.X - _boxGrabPoint.X;
+        int dy = now.Y - _boxGrabPoint.Y;
+
+        if (_draggingBoxGrip == TransformGrip.Inside)
+        {
+            box.DragEdges(start.Left + dx, start.Top + dy, start.Right + dx, start.Bottom + dy);
+            return;
+        }
+
+        int left = start.Left + (_draggingBoxGrip.HasFlag(TransformGrip.Left) ? dx : 0);
+        int right = start.Right + (_draggingBoxGrip.HasFlag(TransformGrip.Right) ? dx : 0);
+        int top = start.Top + (_draggingBoxGrip.HasFlag(TransformGrip.Top) ? dy : 0);
+        int bottom = start.Bottom + (_draggingBoxGrip.HasFlag(TransformGrip.Bottom) ? dy : 0);
+
+        (left, top, right, bottom) = ConstrainProportions(start, left, top, right, bottom);
+
+        box.DragEdges(left, top, right, bottom);
+    }
+
+    /// <summary>
+    /// Holds a corner drag to the box's original proportions while Shift is down.
+    /// </summary>
+    /// <remarks>
+    /// Only corners, because an edge drag has one axis and nothing to be proportional to. The
+    /// larger of the two scales wins, so the box follows whichever way the pointer has moved
+    /// further, and each axis keeps its own sign so that dragging a corner right across the box
+    /// still mirrors the artwork.
+    /// </remarks>
+    private (int Left, int Top, int Right, int Bottom) ConstrainProportions(
+        ImageRect start, int left, int top, int right, int bottom)
+    {
+        bool corner = (_draggingBoxGrip & (TransformGrip.Left | TransformGrip.Right)) != 0
+            && (_draggingBoxGrip & (TransformGrip.Top | TransformGrip.Bottom)) != 0;
+
+        if (!corner || !_modifiers.HasFlag(KeyModifiers.Shift) || start.Width <= 0 || start.Height <= 0)
+        {
+            return (left, top, right, bottom);
+        }
+
+        double scaleX = (double)(right - left) / start.Width;
+        double scaleY = (double)(bottom - top) / start.Height;
+        double scale = Math.Max(Math.Abs(scaleX), Math.Abs(scaleY));
+
+        int width = (int)Math.Round(start.Width * scale * (scaleX < 0 ? -1 : 1));
+        int height = (int)Math.Round(start.Height * scale * (scaleY < 0 ? -1 : 1));
+
+        if (_draggingBoxGrip.HasFlag(TransformGrip.Left))
+        {
+            left = right - width;
+        }
+        else
+        {
+            right = left + width;
+        }
+
+        if (_draggingBoxGrip.HasFlag(TransformGrip.Top))
+        {
+            top = bottom - height;
+        }
+        else
+        {
+            bottom = top + height;
+        }
+
+        return (left, top, right, bottom);
+    }
+
+    /// <summary>
+    /// Opens the text layer under a point for editing, whatever tool is in hand.
+    /// </summary>
+    /// <returns><see langword="true"/> if there was text there and it is now being edited.</returns>
+    private bool TryBeginTextEditAt(Point position)
+    {
+        if (_observedWorkspace is not { } workspace || ToolContext is not { } context)
+        {
+            return false;
+        }
+
+        ImagePoint point = _transform.ToImagePoint(position);
+
+        if (TextTool.FindTextLayerAt(workspace.Document, context.TextRasterizer, point) is not { } layer)
+        {
+            return false;
+        }
+
+        // Already in this text: the double-click was two clicks of the caret, and re-opening
+        // the session would throw away everything typed since it started.
+        if (ReferenceEquals(_observedTextEdit?.Layer, layer))
+        {
+            return false;
+        }
+
+        workspace.CommitTextEdit();
+        workspace.ActiveLayer = layer;
+
+        TextEditSession session = new(workspace, layer, context.TextRasterizer, isNewLayer: false);
+        workspace.BeginTextEdit(session);
+        session.MoveCaretTo(point);
+
+        // The text tool has to come with it: presses go to whichever tool is active, and a
+        // pencil would answer the next click by drawing over the words being edited.
+        ToolRequested?.Invoke(this, TextTool.ToolId);
+        return true;
     }
 
     /// <summary>Offers Enter and Escape to a tool that is holding something.</summary>
@@ -949,11 +1241,11 @@ public sealed class PixelCanvasControl : Control, IDisposable
                 return true;
 
             case Key.Left:
-                editing.MoveCaret(CaretMovement.Left);
+                editing.MoveCaret(CaretMovement.Left, e.KeyModifiers.HasFlag(KeyModifiers.Shift));
                 return true;
 
             case Key.Right:
-                editing.MoveCaret(CaretMovement.Right);
+                editing.MoveCaret(CaretMovement.Right, e.KeyModifiers.HasFlag(KeyModifiers.Shift));
                 return true;
 
             case Key.Up:
@@ -1051,9 +1343,19 @@ public sealed class PixelCanvasControl : Control, IDisposable
         switch (_grab)
         {
             case CanvasGrab.Frame:
-                Cursor = new Cursor(StandardCursorType.Hand);
+                // An edge says which way it moves, so the pointer promises the axis before the
+                // press: left and right edges point across, top and bottom point up and down,
+                // and a corner points along its own diagonal. Inside the frame the whole thing
+                // moves, which is the four-way arrow.
+                Cursor = new Cursor(EdgeCursor(_cropGrip));
                 return;
 
+            case CanvasGrab.BoxEdge:
+                Cursor = new Cursor(BoxEdgeCursor(_boxGrip));
+                return;
+
+            case CanvasGrab.BoxBody:
+            case CanvasGrab.TextEdge:
             case CanvasGrab.Marks:
             case CanvasGrab.Held:
                 Cursor = new Cursor(StandardCursorType.SizeAll);
@@ -1105,9 +1407,15 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// </remarks>
     private void UpdateGrab(Point? position)
     {
+        CropGrip crop = _cropGrip;
+        TransformGrip box = _boxGrip;
+
+        _cropGrip = CropGrip.None;
+        _boxGrip = TransformGrip.None;
+
         CanvasGrab grab = GetGrab(position);
 
-        if (_grab == grab)
+        if (_grab == grab && _cropGrip == crop && _boxGrip == box)
         {
             return;
         }
@@ -1116,10 +1424,52 @@ public sealed class PixelCanvasControl : Control, IDisposable
         UpdateCursor();
     }
 
+    /// <summary>The pointer for a crop frame grip: an axis arrow, or the four-way arrow.</summary>
+    private static StandardCursorType EdgeCursor(CropGrip grip) => grip switch
+    {
+        CropGrip.Left or CropGrip.Right => StandardCursorType.SizeWestEast,
+        CropGrip.Top or CropGrip.Bottom => StandardCursorType.SizeNorthSouth,
+        CropGrip.Left | CropGrip.Top => StandardCursorType.TopLeftCorner,
+        CropGrip.Right | CropGrip.Bottom => StandardCursorType.BottomRightCorner,
+        CropGrip.Right | CropGrip.Top => StandardCursorType.TopRightCorner,
+        CropGrip.Left | CropGrip.Bottom => StandardCursorType.BottomLeftCorner,
+        _ => StandardCursorType.SizeAll,
+    };
+
+    /// <summary>The pointer for a transform box grip, which reads the same as a crop grip.</summary>
+    private static StandardCursorType BoxEdgeCursor(TransformGrip grip) => grip switch
+    {
+        TransformGrip.Left or TransformGrip.Right => StandardCursorType.SizeWestEast,
+        TransformGrip.Top or TransformGrip.Bottom => StandardCursorType.SizeNorthSouth,
+        TransformGrip.Left | TransformGrip.Top => StandardCursorType.TopLeftCorner,
+        TransformGrip.Right | TransformGrip.Bottom => StandardCursorType.BottomRightCorner,
+        TransformGrip.Right | TransformGrip.Top => StandardCursorType.TopRightCorner,
+        TransformGrip.Left | TransformGrip.Bottom => StandardCursorType.BottomLeftCorner,
+        _ => StandardCursorType.SizeAll,
+    };
+
+    /// <summary>How near something has to be to count as grabbable, in image pixels.</summary>
+    private int GetGripTolerance(double screenDistance) =>
+        Math.Max(1, (int)Math.Round(screenDistance / Math.Max(_transform.Scale, 0.01)));
+
     /// <summary>Answers what is under the pointer, without changing anything.</summary>
     private CanvasGrab GetGrab(Point? position)
     {
-        if (_isDraggingTransform || (ActiveTool is CropTool { IsDragging: true }))
+        if (_isDraggingBox)
+        {
+            _boxGrip = _draggingBoxGrip;
+            return _draggingBoxGrip == TransformGrip.Inside ? CanvasGrab.BoxBody : CanvasGrab.BoxEdge;
+        }
+
+        // A crop frame being dragged keeps the arrow of the edge it took hold of, so the
+        // pointer goes on saying which way the edge is travelling for as long as it travels.
+        if (ActiveTool is CropTool { IsDragging: true } held)
+        {
+            _cropGrip = held.CurrentGrip;
+            return CanvasGrab.Frame;
+        }
+
+        if (_isDraggingTransform)
         {
             return CanvasGrab.Held;
         }
@@ -1127,6 +1477,32 @@ public sealed class PixelCanvasControl : Control, IDisposable
         if (position is not { } point || _isPanning || _activeButton != ToolPointerButton.None)
         {
             return CanvasGrab.None;
+        }
+
+        // A transform box owns the canvas while it is up: nothing else can be grabbed, because
+        // every press either adjusts the box or puts it down.
+        if (_observedWorkspace?.ActiveFreeTransform is { } box)
+        {
+            _boxGrip = box.HitTest(
+                _transform.ToImagePoint(point),
+                GetGripTolerance(CropTool.GripScreenDistance));
+
+            return _boxGrip switch
+            {
+                TransformGrip.None => CanvasGrab.None,
+                TransformGrip.Inside => CanvasGrab.BoxBody,
+                _ => CanvasGrab.BoxEdge,
+            };
+        }
+
+        // The border of text being edited moves the words; inside them a drag selects
+        // characters, and there the tool's own I-beam is the right promise.
+        if (_observedTextEdit is { } editing
+            && editing.IsOnBoxEdge(
+                _transform.ToImagePoint(point),
+                GetGripTolerance(TextTool.BoxGripScreenDistance)))
+        {
+            return CanvasGrab.TextEdge;
         }
 
         // Artwork already lifted is in the artist's hand wherever the pointer is, so the whole
@@ -1138,9 +1514,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         if (ActiveTool is CropTool crop && ToolContext is { } context && _observedOverlay?.CropFrame is not null)
         {
-            return crop.HitTest(context, _transform.ToImagePoint(point)) == CropGrip.None
-                ? CanvasGrab.None
-                : CanvasGrab.Frame;
+            _cropGrip = crop.HitTest(context, _transform.ToImagePoint(point));
+            return _cropGrip == CropGrip.None ? CanvasGrab.None : CanvasGrab.Frame;
         }
 
         // A crop frame in play owns the canvas; the branch above has already answered for it.
@@ -1327,6 +1702,41 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        // A transform box owns the canvas while it is up. Every press either takes hold of the
+        // box or puts it down, and a tool given one would draw over artwork that is still being
+        // arranged.
+        if (_observedWorkspace is { ActiveFreeTransform: { } box } transforming)
+        {
+            TransformGrip grip = box.HitTest(
+                _transform.ToImagePoint(position),
+                GetGripTolerance(CropTool.GripScreenDistance));
+
+            if (grip == TransformGrip.None)
+            {
+                // Clicking away puts it down, the way clicking away from anything else does.
+                transforming.CommitFreeTransform();
+            }
+            else
+            {
+                BeginBoxDrag(box, grip, position);
+                e.Pointer.Capture(this);
+            }
+
+            e.Handled = true;
+            UpdateGrab(position);
+            return;
+        }
+
+        // Double-clicking words opens them for editing whatever tool is in hand, the way
+        // double-clicking type does in every layout program. Without it, editing text you drew
+        // an hour ago means first remembering that the text tool exists.
+        if (e.ClickCount == 2 && TryBeginTextEditAt(position))
+        {
+            e.Handled = true;
+            UpdateGrab(position);
+            return;
+        }
+
         // A free transform owns the canvas while it lasts: the pixels are off the layer and
         // in the artist's hand, and a tool given a press now would draw into the hole.
         if (_observedWorkspace?.ActiveTransform is not null)
@@ -1418,6 +1828,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        if (_isDraggingBox)
+        {
+            DragBox(position);
+            e.Handled = true;
+            return;
+        }
+
         if (_isDraggingTransform)
         {
             DragTransform(position);
@@ -1445,6 +1862,18 @@ public sealed class PixelCanvasControl : Control, IDisposable
             UpdateCursor();
             e.Pointer.Capture(null);
             e.Handled = true;
+            return;
+        }
+
+        // The drag ends, the box does not: the artist is free to grab another handle, turn it,
+        // flip it, or press Enter to apply the lot.
+        if (_isDraggingBox)
+        {
+            _isDraggingBox = false;
+            _draggingBoxGrip = TransformGrip.None;
+            e.Pointer.Capture(null);
+            e.Handled = true;
+            UpdateGrab(e.GetPosition(this));
             return;
         }
 
@@ -1491,6 +1920,8 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // The drag stops, but the transform itself survives: the pixels are still in the air
         // and the artist has not said where to put them.
         _isDraggingTransform = false;
+        _isDraggingBox = false;
+        _draggingBoxGrip = TransformGrip.None;
 
         UpdateGrab(_pointerPosition);
         UpdateCursor();
@@ -1612,6 +2043,106 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         _checkerboardBrush ??= CreateCheckerboardBrush();
         context.FillRectangle(_checkerboardBrush, area);
+    }
+
+    /// <summary>
+    /// Lays the check pattern over the drawn pixels, where the artist has asked for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Masked by the composited artwork itself, so the pattern appears exactly where there is
+    /// paint and nowhere else - and fades out with the alpha, so a half-transparent pixel gets
+    /// half as much of it. Empty canvas is left to the pattern <em>behind</em> the picture,
+    /// which is a different setting and answers a different question.
+    /// </para>
+    /// <para>
+    /// The same tiled brush as the background, so the two patterns line up exactly and read as
+    /// one grid: the artwork looks like it is sitting on the board rather than carrying a
+    /// board of its own.
+    /// </para>
+    /// </remarks>
+    private void DrawArtworkChecker(DrawingContext context, WriteableBitmap artwork, Rect documentRect)
+    {
+        if (!ShowArtworkChecker || documentRect.Width <= 0 || documentRect.Height <= 0)
+        {
+            return;
+        }
+
+        _checkerboardBrush ??= CreateCheckerboardBrush();
+
+        ImageBrush mask = new(artwork) { Stretch = Stretch.Fill };
+
+        using (context.PushOpacityMask(mask, documentRect))
+        using (context.PushOpacity(ArtworkCheckerOpacity))
+        {
+            context.FillRectangle(_checkerboardBrush, documentRect);
+        }
+    }
+
+    /// <summary>
+    /// Draws the free transform box: the outline, and the eight handles that resize it.
+    /// </summary>
+    /// <remarks>
+    /// The same outline and handles as the crop frame, deliberately. They are the same gesture
+    /// on two different things, and an artist who has learnt one has learnt the other. What is
+    /// missing is the shading outside, because a transform changes the artwork rather than the
+    /// canvas, and there is nothing out there to be excluded.
+    /// </remarks>
+    private void DrawTransformBox(DrawingContext context)
+    {
+        if (_observedWorkspace?.ActiveFreeTransform is not { } box
+            || HighlightBrush is not { } bright
+            || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        Rect rect = _transform.GetPixelRect(box.Bounds);
+
+        DrawOutlinedRect(context, rect, dark, bright);
+
+        foreach (Point handle in GetCropHandles(rect))
+        {
+            Rect handleBox = new(
+                handle.X - (CropHandleSize / 2.0),
+                handle.Y - (CropHandleSize / 2.0),
+                CropHandleSize,
+                CropHandleSize);
+
+            context.FillRectangle(dark, handleBox.Inflate(1));
+            context.FillRectangle(bright, handleBox);
+        }
+    }
+
+    /// <summary>
+    /// Draws the frame around the text being edited, and the highlight behind any selected
+    /// characters.
+    /// </summary>
+    /// <remarks>
+    /// The frame is what says "you are in a text field": words on a canvas otherwise look
+    /// exactly like words that have been painted there, and there is nothing else on screen to
+    /// tell an artist that the next keystroke will be typed rather than treated as a shortcut.
+    /// It is also the handle the block is dragged by, which is why it is dashed rather than
+    /// hairline - it has to be findable.
+    /// </remarks>
+    private void DrawTextBox(DrawingContext context)
+    {
+        if (_observedTextEdit is not { } editing
+            || HighlightBrush is not { } bright
+            || HighlightShadowBrush is not { } dark)
+        {
+            return;
+        }
+
+        foreach (ImageRect highlight in editing.GetSelectionRectangles())
+        {
+            context.FillRectangle(TextSelectionFill, _transform.GetPixelRect(highlight));
+        }
+
+        Rect box = _transform.GetPixelRect(editing.TextBounds.Inflate(TextEditSession.BoxInset));
+
+        context.DrawRectangle(new Pen(dark, 1.0) { DashStyle = new ImmutableDashStyle([3, 3], 0) }, box.Inflate(0.5));
+        context.DrawRectangle(new Pen(bright, 1.0) { DashStyle = new ImmutableDashStyle([3, 3], 3) }, box.Inflate(0.5));
     }
 
     /// <summary>The part of the image plane the viewport currently covers, in whole pixels.</summary>
@@ -1884,6 +2415,15 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // not drawn at all. Nothing else would say the pasted pixels are still in the artist's
         // hand, and the old marquee is about to be replaced by this one anyway — showing it in
         // the meantime points at the wrong pixels.
+        // A transform of the artwork leaves the marquee where it was until the box is put
+        // down, so drawing it would put the ants around the space the artwork has just left.
+        // A transform of the marquee itself is the exact opposite: there the ants are the thing
+        // being changed, and they are already following the box.
+        if (_observedWorkspace?.ActiveFreeTransform is { Scope: FreeTransformScope.Pixels })
+        {
+            return;
+        }
+
         if (_observedWorkspace?.ActiveTransform is { MovesTheSelection: false } floating)
         {
             DrawMarchingAnts(context, _transform.GetPixelRect(floating.Bounds), dark, bright);
@@ -2145,6 +2685,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // clicking another tab safe.
         _observedWorkspace?.CommitTextEdit();
         _observedWorkspace?.CommitTransform();
+        _observedWorkspace?.CommitFreeTransform();
 
         if (_observedWorkspace is not null)
         {
@@ -2293,6 +2834,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         // this" as pressing Enter, and leaving the artwork in mid-air while a pencil draws
         // underneath it would be indefensible.
         _observedWorkspace?.CommitTransform();
+        _observedWorkspace?.CommitFreeTransform();
 
         HandOverActiveStroke(previous, tool);
 
@@ -2371,6 +2913,14 @@ public sealed class PixelCanvasControl : Control, IDisposable
             case nameof(DocumentWorkspace.Selection):
             case nameof(DocumentWorkspace.ActiveTransform):
                 _selectionOutline = null;
+                InvalidateVisual();
+                break;
+
+            case nameof(DocumentWorkspace.ActiveFreeTransform):
+                _selectionOutline = null;
+                _isDraggingBox = false;
+                _draggingBoxGrip = TransformGrip.None;
+                UpdateGrab(_pointerPosition);
                 InvalidateVisual();
                 break;
 

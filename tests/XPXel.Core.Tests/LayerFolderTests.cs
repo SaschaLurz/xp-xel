@@ -40,7 +40,7 @@ public sealed class LayerFolderTests
         int originalIndex = document.Root.IndexOf(middle);
 
         GroupLayer folder = new(Guid.NewGuid(), "Folder");
-        workspace.History.Execute(new GroupLayersCommand("Group Layer", document, folder, middle));
+        workspace.History.Execute(new GroupLayersCommand("Group Layer", document, folder, [middle]));
 
         Assert.Equal(originalIndex, document.Root.IndexOf(folder));
         Assert.Same(folder, middle.Parent);
@@ -60,7 +60,7 @@ public sealed class LayerFolderTests
         int originalIndex = document.Root.IndexOf(layer);
 
         GroupLayer folder = new(Guid.NewGuid(), "Folder");
-        workspace.History.Execute(new GroupLayersCommand("Group Layer", document, folder, layer));
+        workspace.History.Execute(new GroupLayersCommand("Group Layer", document, folder, [layer]));
         workspace.History.Undo();
 
         Assert.Same(document.Root, layer.Parent);
@@ -81,7 +81,7 @@ public sealed class LayerFolderTests
         RasterLayer layer = document.CreateRasterLayer("Body");
         GroupLayer folder = new(Guid.NewGuid(), "Folder");
 
-        workspace.History.Execute(new GroupLayersCommand("Group Layer", document, folder, layer));
+        workspace.History.Execute(new GroupLayersCommand("Group Layer", document, folder, [layer]));
         workspace.History.Undo();
         workspace.History.Redo();
 
@@ -100,7 +100,7 @@ public sealed class LayerFolderTests
         PixelBuffer before = compositor.ComposeToNewBuffer(document, document.Frames[0]);
 
         GroupLayer folder = new(Guid.NewGuid(), "Folder");
-        new GroupLayersCommand("Group Layer", document, folder, layer).Redo();
+        new GroupLayersCommand("Group Layer", document, folder, [layer]).Redo();
 
         PixelBuffer after = compositor.ComposeToNewBuffer(document, document.Frames[0]);
 

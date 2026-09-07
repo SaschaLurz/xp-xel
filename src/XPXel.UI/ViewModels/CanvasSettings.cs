@@ -71,6 +71,18 @@ public sealed partial class CanvasSettings : ObservableObject
     [ObservableProperty]
     private bool _showTransparencyChecker = true;
 
+    /// <summary>
+    /// Whether the check pattern is also laid over the drawn pixels.
+    /// </summary>
+    /// <remarks>
+    /// A separate pattern from the one behind the artwork, and a separate switch, because the
+    /// two answer different questions. The one behind says "there is nothing here"; this one is
+    /// a texture over the picture itself, masked to the pixels that carry paint. Off by default,
+    /// since it sits on top of the work and is a look rather than information.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _showArtworkChecker;
+
     /// <summary>How far one zoom step travels, where 1 is the default.</summary>
     /// <remarks>
     /// A setting rather than a constant because there is no one right answer: someone drawing

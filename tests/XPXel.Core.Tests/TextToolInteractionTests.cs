@@ -139,6 +139,60 @@ public sealed class TextToolInteractionTests
     }
 
     [Fact]
+    public void TheMoveToolSlidesTextByItsOriginAndKeepsTheGlyphs()
+    {
+        Fixture fixture = new(96, 32);
+
+        fixture.Click(2, 2);
+        fixture.Type("abc");
+        fixture.Workspace.CommitTextEdit();
+
+        TextLayer layer = fixture.Document.EnumerateLayers().OfType<TextLayer>().First();
+        fixture.Workspace.ActiveLayer = layer;
+
+        int before = fixture.OpaqueCount();
+        Assert.True(before > 0);
+
+        MoveTool move = new();
+        ToolPointerEventArgs press = new(new ImagePoint(4, 4), ToolPointerButton.Left);
+        ToolPointerEventArgs release = new(new ImagePoint(9, 7), ToolPointerButton.Left);
+
+        move.OnPointerPressed(fixture.Context, press);
+        move.OnPointerMoved(fixture.Context, release);
+        move.OnPointerReleased(fixture.Context, release);
+
+        // The origin moved by the drag, and the glyphs came with it. A text layer whose cel is
+        // slid instead would snap back on the next re-render, and one re-rendered through a
+        // rasteriser that draws nothing would come back empty - which is what this counts.
+        Assert.Equal(new ImagePoint(7, 5), layer.Origin);
+        Assert.Equal(before, fixture.OpaqueCount());
+    }
+
+    [Fact]
+    public void UndoingATextMovePutsTheWordsBackWhereTheyWere()
+    {
+        Fixture fixture = new(96, 32);
+
+        fixture.Click(2, 2);
+        fixture.Type("abc");
+        fixture.Workspace.CommitTextEdit();
+
+        TextLayer layer = fixture.Document.EnumerateLayers().OfType<TextLayer>().First();
+        fixture.Workspace.ActiveLayer = layer;
+
+        MoveTool move = new();
+        move.OnPointerPressed(fixture.Context, new ToolPointerEventArgs(new ImagePoint(4, 4), ToolPointerButton.Left));
+        move.OnPointerReleased(fixture.Context, new ToolPointerEventArgs(new ImagePoint(9, 4), ToolPointerButton.Left));
+
+        Assert.Equal(new ImagePoint(7, 2), layer.Origin);
+
+        fixture.Workspace.History.Undo();
+
+        Assert.Equal(new ImagePoint(2, 2), layer.Origin);
+        Assert.True(fixture.OpaqueCount() > 0);
+    }
+
+    [Fact]
     public void EveryStyleTheTextPanelCanSetRendersWithoutThrowing()
     {
         Fixture fixture = new(64, 64);
@@ -203,7 +257,7 @@ public sealed class TextToolInteractionTests
             ToolSettings settings = new();
             settings.TextDefaults.Color = Black;
 
-            Context = new ToolContext(Workspace, settings, new ColorSlots { Primary = Black });
+            Context = new ToolContext(Workspace, settings, new ColorSlots { Primary = Black }, Rasterizer);
             _tool = new TextTool(Rasterizer);
         }
 

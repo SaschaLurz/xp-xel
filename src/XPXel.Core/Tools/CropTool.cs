@@ -103,6 +103,14 @@ public sealed class CropTool : ITool, IInteractiveTool
     /// </remarks>
     public bool IsDragging => _isDragging;
 
+    /// <summary>Which part of the frame the drag in progress took hold of.</summary>
+    /// <remarks>
+    /// Read by the canvas so that the pointer keeps the arrow of the edge being dragged for as
+    /// long as the drag lasts. Re-hit-testing during the drag would answer about wherever the
+    /// pointer has got to rather than about what it is holding, and the arrow would flicker.
+    /// </remarks>
+    public CropGrip CurrentGrip => _grip;
+
     /// <summary>Reports what a point is over, without touching the frame.</summary>
     /// <param name="context">The document being acted on, for the zoom the tolerance is measured in.</param>
     /// <param name="point">The point to test, in image coordinates.</param>

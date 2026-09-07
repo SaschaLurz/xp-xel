@@ -36,6 +36,12 @@ public readonly record struct ClipboardResult(bool Succeeded, string Message);
 /// document copied and pasted within one tab still works.
 /// </para>
 /// <para>
+/// <b>Text being typed answers the shortcuts itself.</b> While a text layer is open for
+/// editing, Ctrl+C and Ctrl+X act on the selected characters and Ctrl+V puts words in at the
+/// caret. That is what those keys mean inside a text field, and copying the artwork out from
+/// under someone mid-sentence is not what they asked for.
+/// </para>
+/// <para>
 /// <b>Text becomes a text layer, not pixels.</b> Pasted words stay words: the layer can be
 /// re-opened and rewritten, which is what the text tool would have given, and rasterising them
 /// on arrival would throw that away for no gain. Text pasted while a text layer is being typed
@@ -98,6 +104,13 @@ public sealed class ClipboardService
     {
         ArgumentNullException.ThrowIfNull(workspace);
 
+        // Typing wins. Inside a text layer these keys belong to the characters, and falling
+        // through to the artwork would copy pixels the artist cannot even see the marks around.
+        if (workspace.ActiveTextEdit is { } editing)
+        {
+            return await CopyCharactersAsync(editing, cut).ConfigureAwait(true);
+        }
+
         if (PixelClip.FromSelection(workspace) is not { } clip)
         {
             return new ClipboardResult(false, "Mark something first — there is nothing to copy");
@@ -129,6 +142,14 @@ public sealed class ClipboardService
 
         (PixelClip? clip, string? text) = await ReadAsync().ConfigureAwait(true);
 
+        // Words go into words. A clip of pixels means nothing at a caret, and a clipboard
+        // carrying both is a clipboard that was filled by copying artwork out of this program -
+        // which is not what someone halfway through a sentence is reaching for.
+        if (workspace.ActiveTextEdit is not null && !string.IsNullOrEmpty(text))
+        {
+            return PasteText(workspace, text);
+        }
+
         clip ??= _sessionClip;
 
         if (clip is not null)
@@ -144,6 +165,44 @@ public sealed class ClipboardService
         }
 
         return new ClipboardResult(false, "There is nothing on the clipboard to paste");
+    }
+
+    /// <summary>Copies the selected characters of the text being typed.</summary>
+    /// <remarks>
+    /// Plain text and nothing else, because that is what the characters are. It goes out through
+    /// the ordinary text format so it can be pasted into any other program, and the in-session
+    /// pixel clip is deliberately left alone: copying words should not quietly throw away
+    /// artwork that was copied a minute ago.
+    /// </remarks>
+    private static async Task<ClipboardResult> CopyCharactersAsync(TextEditSession editing, bool cut)
+    {
+        if (!editing.HasSelection)
+        {
+            return new ClipboardResult(false, "Select some characters first — drag across them, or hold Shift and use the arrow keys");
+        }
+
+        string text = editing.SelectedText;
+
+        if (ResolveClipboard() is { } clipboard)
+        {
+            try
+            {
+                await clipboard.SetTextAsync(text).ConfigureAwait(true);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // Same reasoning as every other clipboard call here: another process can be
+                // holding it open, and that is not worth an exception mid-sentence.
+            }
+        }
+
+        if (!cut)
+        {
+            return new ClipboardResult(true, $"Copied {text.Length} character{(text.Length == 1 ? string.Empty : "s")}");
+        }
+
+        editing.DeleteSelection();
+        return new ClipboardResult(true, $"Cut {text.Length} character{(text.Length == 1 ? string.Empty : "s")}");
     }
 
     /// <summary>Writes a clip to the system clipboard, as both a bitmap and an exact clip.</summary>

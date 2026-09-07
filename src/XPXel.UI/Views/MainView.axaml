@@ -38,12 +38,15 @@
     <KeyBinding Gesture="Ctrl+Z" Command="{Binding UndoCommand}" />
     <KeyBinding Gesture="Ctrl+Y" Command="{Binding RedoCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+Z" Command="{Binding RedoCommand}" />
-    <KeyBinding Gesture="Ctrl+A" Command="{Binding SelectAllCommand}" />
     <KeyBinding Gesture="Ctrl+D" Command="{Binding DeselectCommand}" />
     <KeyBinding Gesture="Ctrl+Shift+I" Command="{Binding InvertSelectionCommand}" />
     <KeyBinding Gesture="Ctrl+T" Command="{Binding FreeTransformCommand}" />
     <KeyBinding Gesture="Ctrl+Alt+C" Command="{Binding ChangeCanvasSizeCommand}" />
-    <!-- The bare-key shortcuts - X to swap colours, and one letter per tool - are handled in
+    <!-- Ctrl+A is not here either, for the same reason as the clipboard keys: it means "all
+         the pixels" on the canvas and "all the words" inside text, and a KeyBinding cannot
+         tell the two apart. See MainView.axaml.cs.
+
+         The bare-key shortcuts - X to swap colours, and one letter per tool - are handled in
          code-behind rather than declared here. A KeyBinding fires wherever the key is
          pressed, so binding "X" would swap the drawing colours in the middle of renaming a
          layer to "Axe". The code-behind checks first that nothing is being typed into.
@@ -100,6 +103,10 @@
         <MenuItem Header="_Image">
           <MenuItem Header="_Canvas Size…" InputGesture="Ctrl+Alt+C" Command="{Binding ChangeCanvasSizeCommand}" />
           <MenuItem Header="Crop to _Selection" Command="{Binding CropToSelectionCommand}" />
+          <Separator />
+          <MenuItem Header="Free _Transform" InputGesture="Ctrl+T"
+                    Command="{Binding FreeTransformCommand}"
+                    ToolTip.Tip="Scale, flip or turn the marked pixels — or everything on the marked layers when nothing is marked. Enter applies, Escape cancels" />
         </MenuItem>
 
         <MenuItem Header="_Select">
@@ -108,9 +115,12 @@
                     ToolTip.Tip="Escape does the same, as does clicking the empty space beside the picture" />
           <MenuItem Header="_Invert Selection" InputGesture="Ctrl+Shift+I" Command="{Binding InvertSelectionCommand}" />
           <Separator />
-          <MenuItem Header="_Move Selected Pixels" InputGesture="Ctrl+T"
-                    Command="{Binding FreeTransformCommand}"
-                    ToolTip.Tip="Lift the selected pixels and drag them. Enter places them, Escape puts them back" />
+          <MenuItem Header="_Move Selected Pixels"
+                    Command="{Binding MoveSelectedPixelsCommand}"
+                    ToolTip.Tip="Lift the marked pixels and drag them. Enter places them, Escape puts them back" />
+          <MenuItem Header="_Transform Selection…"
+                    Command="{Binding TransformSelectionCommand}"
+                    ToolTip.Tip="Resize, flip or turn the marks themselves. The artwork underneath is not touched" />
         </MenuItem>
 
         <MenuItem Header="_Animation">
@@ -163,6 +173,10 @@
                     ToggleType="CheckBox"
                     IsChecked="{Binding CanvasSettings.ShowTransparencyChecker, Mode=TwoWay}"
                     ToolTip.Tip="The grey chequered pattern behind the artwork, which marks the pixels that are not painted at all" />
+          <MenuItem Header="Show Checks _On the Artwork"
+                    ToggleType="CheckBox"
+                    IsChecked="{Binding CanvasSettings.ShowArtworkChecker, Mode=TwoWay}"
+                    ToolTip.Tip="Lay the same chequered pattern over the pixels you have painted, as a texture. Separate from the pattern behind the artwork" />
           <MenuItem Header="Show Colour by the C_ursor"
                     ToggleType="CheckBox"
                     IsChecked="{Binding CanvasSettings.ShowColorSwatchCursor, Mode=TwoWay}" />
@@ -280,6 +294,10 @@
                         IsChecked="{Binding CanvasSettings.ShowTransparencyChecker, Mode=TwoWay}"
                         VerticalAlignment="Center"
                         ToolTip.Tip="The grey chequered pattern behind the artwork, which marks the pixels that are not painted at all. Turn it off for a plain background" />
+              <CheckBox Content="On art"
+                        IsChecked="{Binding CanvasSettings.ShowArtworkChecker, Mode=TwoWay}"
+                        VerticalAlignment="Center"
+                        ToolTip.Tip="Lay the same chequered pattern over the pixels you have painted, as a texture over the colours" />
 
               <TextBlock Text="Zoom speed" Classes="subtle" VerticalAlignment="Center" Margin="8,0,0,0" />
               <Slider Width="90"

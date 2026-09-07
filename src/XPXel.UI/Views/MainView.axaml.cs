@@ -90,7 +90,7 @@ public partial class MainView : UserControl
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            if (!HandleClipboardShortcut(viewModel, e))
+            if (!HandleClipboardShortcut(viewModel, e) && !HandleSelectAllShortcut(viewModel, e))
             {
                 HandleZoomShortcut(viewModel, e);
             }
@@ -118,12 +118,40 @@ public partial class MainView : UserControl
     /// Ctrl+C there would copy pixels instead of the word under the caret.
     /// </para>
     /// <para>
-    /// A text layer being typed on the canvas is the one exception, and only for paste: there is
-    /// no text box to hand the key to, and pasted words belong in the words being typed. Copy and
-    /// cut are held back there entirely — neither has a meaning for a caret with nothing selected,
-    /// and cutting pixels out from under someone mid-sentence is not what they asked for.
+    /// A text layer being typed on the canvas is the one exception: there is no text box to hand
+    /// the key to, so all three are passed through to <see cref="ClipboardService"/>, which knows
+    /// that an open text edit means the keys belong to the characters rather than to the artwork.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Handles Ctrl+A, unless something with its own idea of "all" has focus.
+    /// </summary>
+    /// <returns><see langword="true"/> if the key was Ctrl+A, handled or deliberately left alone.</returns>
+    /// <remarks>
+    /// Here rather than declared as a <c>KeyBinding</c> because "select all" means two different
+    /// things depending on where the artist is working: all the pixels on the canvas, or all the
+    /// words in the text they are typing. A binding fires wherever the key is pressed and cannot
+    /// tell them apart, so pressing Ctrl+A mid-sentence used to mark the entire canvas.
+    ///
+    /// Text being typed on the canvas never reaches this: the canvas answers Ctrl+A itself and
+    /// marks the key handled, and a handled key never arrives at this bubbling handler. A text
+    /// box does the same for its own contents; the check below is a belt to that braces.
+    /// </remarks>
+    private bool HandleSelectAllShortcut(MainViewModel viewModel, KeyEventArgs e)
+    {
+        if (e.Key != Key.A || e.KeyModifiers != KeyModifiers.Control)
+        {
+            return false;
+        }
+
+        if (!IsTypingIntoTextBox())
+        {
+            Execute(viewModel.SelectAllCommand, e);
+        }
+
+        return true;
+    }
+
     private bool HandleClipboardShortcut(MainViewModel viewModel, KeyEventArgs e)
     {
         if (e.KeyModifiers != KeyModifiers.Control)
@@ -133,7 +161,7 @@ public partial class MainView : UserControl
 
         switch (e.Key)
         {
-            case Key.C or Key.X when !IsTypingSomewhere():
+            case Key.C or Key.X when !IsTypingIntoTextBox():
                 Execute(e.Key == Key.C ? viewModel.CopyCommand : viewModel.CutCommand, e);
                 return true;
 

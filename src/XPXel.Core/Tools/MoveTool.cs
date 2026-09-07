@@ -1,6 +1,7 @@
 using XPXel.Core.Documents;
 using XPXel.Core.History;
 using XPXel.Core.Primitives;
+using XPXel.Core.Text;
 
 namespace XPXel.Core.Tools;
 
@@ -32,6 +33,14 @@ namespace XPXel.Core.Tools;
 /// layer did you mean?" is what the layers panel is for.
 /// </para>
 /// <para>
+/// <b>Text moves as text.</b> A text layer keeps its pixels in a cel like everything else, but
+/// those pixels are a cache regenerated from the words, so sliding the cel would put the glyphs
+/// back where they started the next time anything re-rendered them. Dragging a text layer moves
+/// its origin instead and re-renders from there, which is why text could not be moved at all
+/// before: the drag was moving the one thing about a text layer that does not decide where it
+/// appears.
+/// </para>
+/// <para>
 /// <b>A selection narrows what "this" means.</b> Having marked some pixels, an artist who
 /// reaches for the move tool means those pixels and not the layer they sit on — moving the whole
 /// layer at that point would silently undo the work of making the selection. So when something
@@ -49,6 +58,7 @@ public sealed class MoveTool : ITool
     private const string ActionName = "Move Layer";
 
     private Cel? _cel;
+    private TextLayer? _text;
     private ImagePoint _originalOffset;
     private ImagePoint _anchor;
     private bool _isDragging;
@@ -69,7 +79,12 @@ public sealed class MoveTool : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (e.Button != ToolPointerButton.Left || !context.Workspace.CanEditActiveLayer)
+        // A text layer is not something CanEditActiveLayer admits to — nothing may draw on one —
+        // but it is very much something that can be moved, so it is asked about separately.
+        bool movableText = context.Workspace.ActiveLayer is TextLayer { IsLocked: false } movable
+            && movable.IsEffectivelyVisible;
+
+        if (e.Button != ToolPointerButton.Left || (!context.Workspace.CanEditActiveLayer && !movableText))
         {
             return;
         }
@@ -80,6 +95,16 @@ public sealed class MoveTool : ITool
         // this gesture rather than on the next one.
         if (context.Workspace.Selection is { IsEmpty: false } && context.Workspace.BeginTransform())
         {
+            return;
+        }
+
+        // Text is dragged by its origin, for the reason in the type remarks.
+        if (context.Workspace.ActiveLayer is TextLayer { IsLocked: false } text && text.IsEffectivelyVisible)
+        {
+            _text = text;
+            _originalOffset = text.Origin;
+            _anchor = e.Position;
+            _isDragging = true;
             return;
         }
 
@@ -102,12 +127,26 @@ public sealed class MoveTool : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (!_isDragging || _cel is not { } cel)
+        if (!_isDragging)
         {
             return;
         }
 
-        cel.Offset = _originalOffset.Translate(e.Position.X - _anchor.X, e.Position.Y - _anchor.Y);
+        ImagePoint moved = _originalOffset.Translate(e.Position.X - _anchor.X, e.Position.Y - _anchor.Y);
+
+        if (_text is { } text)
+        {
+            text.Origin = moved;
+            TextLayerRenderer.Render(context.Document, text, context.Workspace.ActiveFrame, context.TextRasterizer);
+        }
+        else if (_cel is { } cel)
+        {
+            cel.Offset = moved;
+        }
+        else
+        {
+            return;
+        }
 
         // The whole canvas, because the layer has moved as a whole and the region it vacated
         // needs repainting just as much as the one it arrived in.
@@ -120,15 +159,31 @@ public sealed class MoveTool : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (!_isDragging || _cel is not { } cel)
+        if (!_isDragging)
         {
             return;
         }
 
         _isDragging = false;
+
+        TextLayer? text = _text;
+        Cel? cel = _cel;
+
+        _text = null;
         _cel = null;
 
         ImagePoint delta = new(e.Position.X - _anchor.X, e.Position.Y - _anchor.Y);
+
+        if (text is not null)
+        {
+            CommitTextMove(context, text, delta);
+            return;
+        }
+
+        if (cel is null)
+        {
+            return;
+        }
 
         // The preview was a borrowed offset, so it is handed back before the real move runs.
         // Otherwise the command would move the layer a second time, from where the drag left it.
@@ -157,7 +212,50 @@ public sealed class MoveTool : ITool
             context?.Document.NotifyPixelsChanged(context.Document.Bounds);
         }
 
+        if (_text is { } text && context is not null)
+        {
+            text.Origin = _originalOffset;
+            TextLayerRenderer.Render(context.Document, text, context.Workspace.ActiveFrame, context.TextRasterizer);
+            context.Document.NotifyPixelsChanged(context.Document.Bounds);
+        }
+
         _isDragging = false;
         _cel = null;
+        _text = null;
+    }
+
+    /// <summary>
+    /// Records a finished drag of a text layer as one undoable step.
+    /// </summary>
+    /// <remarks>
+    /// The origin is handed back before the command runs, for the same reason the cel offset is:
+    /// the drag was a live preview, and a command that started from where the preview left off
+    /// would move the words twice as far.
+    /// </remarks>
+    private void CommitTextMove(ToolContext context, TextLayer text, ImagePoint delta)
+    {
+        ImagePoint moved = _originalOffset.Translate(delta.X, delta.Y);
+
+        text.Origin = _originalOffset;
+        TextLayerRenderer.Render(context.Document, text, context.Workspace.ActiveFrame, context.TextRasterizer);
+
+        if (delta == ImagePoint.Origin)
+        {
+            context.Document.NotifyPixelsChanged(context.Document.Bounds);
+            return;
+        }
+
+        context.History.Execute(new SetTextCommand(
+            ActionName,
+            context.Document,
+            text,
+            context.Workspace.ActiveFrame,
+            context.TextRasterizer,
+            text.Text,
+            text.Style,
+            _originalOffset,
+            text.Text,
+            text.Style,
+            moved));
     }
 }

@@ -31,7 +31,17 @@ namespace XPXel.UI.Views;
 /// <para>
 /// <b>Every drop acts on the dragged row, never on the selected one.</b> Picking a layer up
 /// does not select it, so the two are routinely different; a drop that quietly operated on
-/// the selection would duplicate or — far worse — delete the wrong layer.
+/// the selection would duplicate or — far worse — delete the wrong layer. When the dragged row
+/// <i>is</i> one of several marked ones, the whole marked set travels with it, which is the
+/// rule every file manager follows; <see cref="LayersViewModel.GetTargets"/> owns that decision
+/// so that the buttons and the drops agree about it.
+/// </para>
+/// <para>
+/// <b>Collapsing a multiple selection waits for the release.</b> A list box narrows its
+/// selection to the row under the pointer the moment that row is pressed, which would throw the
+/// marked set away before a drag of it could begin. So a plain press on an already-marked row
+/// is held back here and applied on release instead, if the press turned out to be a click
+/// rather than a drag. This is what every file manager does, for exactly this reason.
 /// </para>
 /// </remarks>
 public partial class LayersView : UserControl
@@ -63,6 +73,12 @@ public partial class LayersView : UserControl
 
     private Point _pressOrigin;
     private LayerItemViewModel? _pressedRow;
+
+    /// <summary>
+    /// The row whose selection collapse was held back at press time, to be applied on release
+    /// if no drag started. See the type remarks.
+    /// </summary>
+    private LayerItemViewModel? _deferredCollapse;
 
     /// <summary>
     /// The press that may become a drag. Avalonia 12 requires the originating
@@ -105,6 +121,7 @@ public partial class LayersView : UserControl
         _pressedRow = FindRow(e.Source as Visual);
         _pressOrigin = e.GetPosition(this);
         _pressArgs = e;
+        _deferredCollapse = null;
 
         // Ctrl-clicking a preview marks everything on that layer. It is on the preview rather
         // than the whole row because the preview is the picture of the layer's contents, which
@@ -131,6 +148,20 @@ public partial class LayersView : UserControl
             _pressedRow.IsEditingName = true;
             _pressedRow = null;
             _pressArgs = null;
+            return;
+        }
+
+        // A plain press on a row that is already part of a multiple selection is held back, so
+        // that the selection survives long enough to be dragged. Ctrl and Shift are excluded
+        // because there the artist is editing the selection and means it to change now.
+        if (_pressedRow is { } marked
+            && Model is { } panel
+            && panel.MarkedRows.Count > 1
+            && panel.MarkedRows.Contains(marked)
+            && e.KeyModifiers == KeyModifiers.None)
+        {
+            _deferredCollapse = marked;
+            e.Handled = true;
         }
     }
 
@@ -151,9 +182,12 @@ public partial class LayersView : UserControl
         }
 
         // Clear the pending press before awaiting: the drag runs a nested input loop, and
-        // re-entering this handler with the same row would start a second drag.
+        // re-entering this handler with the same row would start a second drag. The held-back
+        // collapse is dropped too: this press turned out to be a drag, so the selection it was
+        // going to narrow is the selection being dragged.
         _pressedRow = null;
         _pressArgs = null;
+        _deferredCollapse = null;
 
         DataTransfer payload = new();
         payload.Add(DataTransferItem.Create(LayerRowFormat, row));
@@ -176,6 +210,38 @@ public partial class LayersView : UserControl
     {
         _pressedRow = null;
         _pressArgs = null;
+
+        // The press never became a drag, so it was an ordinary click after all and means what a
+        // click on a multiple selection always means: keep this one, drop the rest.
+        if (_deferredCollapse is { } row && Model is { } model)
+        {
+            _deferredCollapse = null;
+
+            model.SelectedLayer = row;
+            model.SetMarkedRows([row]);
+            SyncListSelection(row);
+        }
+    }
+
+    /// <summary>Reports the list box selection to the view model as the marked set.</summary>
+    private void OnListSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ListBox { SelectedItems: { } selected } && Model is { } model)
+        {
+            model.SetMarkedRows(selected.OfType<LayerItemViewModel>());
+        }
+    }
+
+    /// <summary>Narrows the list box to a single row, without re-entering the handler above.</summary>
+    private void SyncListSelection(LayerItemViewModel row)
+    {
+        ListBox list = this.GetControl<ListBox>("LayerList");
+
+        if (list.SelectedItems is { } selected && (selected.Count != 1 || selected[0] != row))
+        {
+            selected.Clear();
+            selected.Add(row);
+        }
     }
 
     // ---------------------------------------------------------------------------------

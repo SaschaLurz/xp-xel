@@ -80,6 +80,8 @@ public sealed class EditorDocument : Document
         // On the document rather than on the shell, because the canvas menu binds to the
         // document — a tab torn off into a floating window has no shell above it to reach.
         MoveSelectionCommand = new RelayCommand(ToggleSelectionMove);
+        TransformCommand = new RelayCommand(() => ToggleTransform(FreeTransformScope.Pixels));
+        TransformSelectionCommand = new RelayCommand(() => ToggleTransform(FreeTransformScope.Marks));
 
         UpdateTitle();
     }
@@ -106,6 +108,28 @@ public sealed class EditorDocument : Document
     /// </remarks>
     [JsonIgnore]
     public ICommand MoveSelectionCommand { get; }
+
+    /// <summary>
+    /// Puts a transform box around the marked pixels, or around the marked layers when nothing
+    /// is marked. The same action as Ctrl+T.
+    /// </summary>
+    [JsonIgnore]
+    public ICommand TransformCommand { get; }
+
+    /// <summary>
+    /// Puts a transform box around the marching ants alone, so the marquee can be resized
+    /// without the artwork inside it moving at all.
+    /// </summary>
+    [JsonIgnore]
+    public ICommand TransformSelectionCommand { get; }
+
+    /// <summary>Gets a value indicating whether a transform box is up right now.</summary>
+    [JsonIgnore]
+    public bool IsTransforming => Workspace.ActiveFreeTransform is not null;
+
+    /// <summary>What the canvas menu's transform entry should say.</summary>
+    [JsonIgnore]
+    public string TransformLabel => IsTransforming ? "Apply the transform" : "Transform";
 
     /// <summary>Gets a value indicating whether anything is currently marked.</summary>
     [JsonIgnore]
@@ -210,6 +234,24 @@ public sealed class EditorDocument : Document
             OnPropertyChanged(nameof(IsAnythingSelected));
             OnPropertyChanged(nameof(MoveSelectionLabel));
         }
+
+        if (e.PropertyName is nameof(DocumentWorkspace.ActiveFreeTransform))
+        {
+            OnPropertyChanged(nameof(IsTransforming));
+            OnPropertyChanged(nameof(TransformLabel));
+        }
+    }
+
+    /// <summary>Opens a transform box, or applies the one that is already up.</summary>
+    private void ToggleTransform(FreeTransformScope scope)
+    {
+        if (Workspace.ActiveFreeTransform is not null)
+        {
+            Workspace.CommitFreeTransform();
+            return;
+        }
+
+        Workspace.BeginFreeTransform(scope);
     }
 
     /// <summary>Lifts the marked pixels, or places them if they are already lifted.</summary>

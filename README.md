@@ -32,6 +32,12 @@ from a single codebase.
   fades everything inside it. The whole panel is direct-manipulable: drop a layer on **+** to
   duplicate it, on the **folder** button to wrap it in a new folder, on **✕** to delete
   *that* layer, or onto a folder row to move it inside.
+- **Several layers at once.** `Ctrl`-click or `Shift`-click to mark a run of layers, and every
+  structural operation takes the lot: drag them onto the **folder** button to wrap them all in
+  one folder, or onto a folder row to move them all inside, in one undo step and keeping the
+  order they were stacked in. Deleting, duplicating, visibility, opacity and blend mode apply
+  to every marked layer, and so do copy, cut and `Ctrl` `T` — copying several layers flattens
+  what you can see across them into one clip.
 - **Tools**: pencil, brush, eraser, bucket fill (with tolerance, contiguous or global),
   colour picker, line, rectangle, ellipse, text, and a rectangular marquee — each with its
   own icon, its own cursor and a single-key shortcut shown beside the icon. Right-click the
@@ -39,10 +45,15 @@ from a single codebase.
 - **A brush that is not a pencil.** The pencil writes one exact colour into one exact pixel,
   always. The brush adds a shape, a size, a soft edge and stroke stabilisation, with a live
   preview of the tip in the Brush panel and its footprint outlined on the canvas as you move.
-- **Editable text.** Click with the text tool and type on the canvas. The words stay words:
-  a text layer can be re-opened and rewritten at any time, and the Text panel carries font,
-  size, bold, italic, underline, strikethrough, alignment, line spacing, colour and an
-  anti-aliasing switch that is off by default because sprite text wants hard pixels.
+- **Editable text, as a text field.** Click with the text tool and type on the canvas, inside
+  a dashed frame that says you are typing rather than drawing. Drag across the glyphs to select
+  characters, hold `Shift` with the arrow keys to extend the range, `Ctrl` `A` for all of it —
+  then type over it, delete it, or copy and cut it as words. Grab the frame to slide the whole
+  block, or move it with the move tool; double-click any text with any tool in hand and the
+  caret drops into it. The words stay words: a text layer can be re-opened and rewritten at any
+  time, and the Text panel carries font, size, bold, italic, underline, strikethrough,
+  alignment, line spacing, colour and an anti-aliasing switch that is off by default because
+  sprite text wants hard pixels.
 - **Animation.** A timeline of frames across the bottom, with a cell per layer per frame, so
   a background can hold still while only the legs move. Duplicate a frame to draw the next
   one, drag frames to reorder, set a hold time per frame or a frame rate for all of them, and
@@ -60,6 +71,15 @@ from a single codebase.
 - **Selections** — drag a rectangular marquee and every tool is clipped to it, with Select
   All, Deselect and Invert in the Select menu. `Esc` clears a selection, so does clicking the
   empty space beside the picture, and `Delete` or `Backspace` erases what is marked.
+- **Free transform.** `Ctrl` `T` puts a box with eight handles around what is marked — or
+  around everything on the marked layers when nothing is marked. Drag a handle to scale, hold
+  `Shift` to keep the proportions, drag one past its opposite edge to flip, and press `R` to
+  turn a quarter turn (`H` and `V` flip outright). Scaling is nearest-neighbour, so a doubled
+  sprite is made of four-pixel blocks in the palette it started with, and rotation is offered in
+  quarter turns only because no other angle survives a pixel grid. `Enter` applies the whole
+  episode as one undo step; `Escape` puts everything back. **Transform Selection**, on the
+  Select menu and the canvas menu, does the same to the marching ants alone and leaves the
+  artwork exactly where it is — for when the shape you marked is right but the size is not.
 - **Copy, cut and paste, in and out of the editor.** `Ctrl` `C` and `Ctrl` `X` take what is
   marked — the exact pixels, alpha and all, and the shape of a selection that is not a
   rectangle. What lands on the system clipboard is an ordinary image as well, so it pastes
@@ -72,7 +92,9 @@ from a single codebase.
   counting as one step.
 - **Canvas**: nearest-neighbour zoom to 64×, hold **Space** to grab and drag the image, a
   transparency checkerboard that can be switched off when it is more noise than information,
-  a pixel grid that appears as you zoom in, a highlight on the pixel under the pointer, and
+  a second checkerboard that can be laid **over** the artwork as a texture — masked to the
+  pixels you actually painted, and switched on and off separately — a pixel grid that appears
+  as you zoom in, a highlight on the pixel under the pointer, and
   **rulers** down the top and left edges numbered from 1, with the pointer's own coordinate in
   the status bar.
 - **Canvas size, both ways.** **Image → Canvas Size** crops a 32×32 down to 16×32 or grows it
@@ -160,13 +182,18 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Mark individual pixels / magic wand | `K` / `W` |
 | Add to a selection / take away from it | Hold `Shift` / hold `Ctrl`, on any selection tool |
 | Mark everything on a layer | `Ctrl`-click its preview in the layers panel |
-| Move what you have marked | Drag its edge, or press inside it and drag, or `Ctrl` `T` |
+| Move what you have marked | Drag its edge, or press inside it and drag |
+| Scale, flip or turn what is marked | `Ctrl` `T`, then drag the handles; `Enter` applies, `Escape` cancels |
+| Transform the marked layers instead | `Ctrl` `T` with nothing marked on the canvas |
+| Keep the proportions while scaling | Hold `Shift` on a corner handle |
+| Turn a quarter turn / flip, mid-transform | `R` (`Shift` `R` the other way) / `H` and `V` |
+| Reshape the marks without moving the artwork | Select → Transform Selection, or the canvas menu |
 | Copy / cut / paste what you have marked | `Ctrl` `C` / `Ctrl` `X` / `Ctrl` `V` |
 | Place or abandon something pasted | `Enter` / `Esc` |
 | Erase what you have marked | `Delete` or `Backspace` |
 | Clear the selection | `Esc`, or click beside the picture, or `Ctrl` `D` |
 | Move a whole layer | `V`, then drag, with nothing marked |
-| Crop | `C`, drag the frame's handles, then `Enter` |
+| Crop | `C`, drag the frame's handles, then `Enter` — the pointer shows which way each edge moves |
 | Draw | Left mouse button |
 | Open the active tool's settings | Right-click the canvas |
 | Pan the canvas | Hold `Space` and drag, or middle mouse button drag |
@@ -185,19 +212,25 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Constrain a shape to a square, circle or 45° line | Hold `Shift` while dragging |
 | Draw a perfectly straight run | Hold `Shift` while drawing; let go and press it again to turn a corner |
 | Change tool without letting go | Press the new tool's key mid-stroke |
-| Move the selected pixels | `Ctrl` `T`, then drag or use the arrow keys; `Enter` places them, `Escape` puts them back |
+| Move the selected pixels | Select → Move Selected Pixels, then drag or use the arrow keys |
 | Show or hide the pixel grid | The **Grid** box on the options bar, or the View menu |
+| Lay the checkerboard over the artwork | The **On art** box on the options bar, or the View menu |
 | Change how far one zoom step travels | The **Zoom speed** slider on the options bar |
 | Go back several steps at once | Click that point in the History panel |
 | Select all / deselect / invert the selection | `Ctrl` `A` / `Ctrl` `D` / `Ctrl` `Shift` `I` |
 | Crop or enlarge the canvas | `Ctrl` `Alt` `C` |
 | Finish a piece of text | Click elsewhere on the canvas, or pick another tool |
 | Abandon a piece of text | `Escape` |
+| Edit text you drew earlier | Double-click it, whatever tool is in hand |
+| Select characters | Drag across them, or `Shift` with the arrow keys, or `Ctrl` `A` |
+| Move a block of text | Drag its frame, or use the move tool |
 | Sample the active layer only | Hold `Alt` with the colour picker |
 | Rename a layer or folder | Double-click its name, or right-click it |
 | Restack a layer | Drag it up or down the list |
 | Duplicate a layer | Drag it onto the **+** button |
+| Mark several layers | `Ctrl`-click to add one, `Shift`-click for a run |
 | Put a layer in a new folder | Drag it onto the **folder** button |
+| Put several layers in one folder | Mark them, then drag any of them onto the **folder** button |
 | Move a layer into an existing folder | Drag it onto the folder's row |
 | Delete the layer you are dragging | Drag it onto the **✕** button |
 | Label a layer or folder with a colour | Right-click it |

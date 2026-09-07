@@ -43,6 +43,11 @@ public partial class EditorDocumentView : UserControl
             AttachKeyboard(TopLevel.GetTopLevel(this));
         };
 
+        // The canvas asks for a tool when a gesture implies one — double-clicking text needs the
+        // text tool in hand, whatever the artist was holding. The canvas knows nothing about the
+        // toolbox and the toolbox knows nothing about pointers, so this view joins them.
+        Canvas.ToolRequested += OnToolRequested;
+
         DetachedFromVisualTree += (_, _) =>
         {
             Subscribe(null);
@@ -146,6 +151,11 @@ public partial class EditorDocumentView : UserControl
     }
 
     private PixelCanvasControl Canvas => this.GetControl<PixelCanvasControl>("PixelCanvas");
+
+    private void OnToolRequested(object? sender, string toolId)
+    {
+        (DataContext as EditorDocument)?.Toolbox.TrySelectById(toolId);
+    }
 
     private void OnZoomRequested(object? sender, CanvasZoomRequest request)
     {

@@ -71,6 +71,7 @@
                                  ShowPixelGrid="{Binding CanvasSettings.ShowPixelGrid}"
                                  ShowColorSwatch="{Binding CanvasSettings.ShowColorSwatchCursor}"
                                  ShowTransparencyChecker="{Binding CanvasSettings.ShowTransparencyChecker}"
+                                 ShowArtworkChecker="{Binding CanvasSettings.ShowArtworkChecker}"
                                  ZoomSpeed="{Binding CanvasSettings.ZoomSpeed}"
                                  OnionSkin="{Binding CanvasSettings.OnionSkin}"
                                  Zoom="{Binding Zoom, Mode=TwoWay}"
@@ -109,13 +110,31 @@
                        IsVisible="{Binding !Toolbox.HasToolOptions}" />
 
             <!-- Marked pixels. First, because when something is marked it is almost always
-                 what the artist opened this menu about. -->
-            <StackPanel Spacing="6" IsVisible="{Binding IsAnythingSelected}">
-              <Button Content="{Binding MoveSelectionLabel}"
-                      Command="{Binding MoveSelectionCommand}"
+                 what the artist opened this menu about.
+
+                 Transform is offered whether or not anything is marked, because with nothing
+                 marked it acts on the marked layers, which is just as often what is wanted.
+                 The other two need marks and are hidden without them. -->
+            <StackPanel Spacing="6">
+              <Button Content="{Binding TransformLabel}"
+                      Command="{Binding TransformCommand}"
                       HorizontalAlignment="Stretch"
                       HorizontalContentAlignment="Center"
-                      ToolTip.Tip="Lift the marked pixels so they can be dragged. Enter places them, Escape puts them back. (Ctrl+T)" />
+                      ToolTip.Tip="Scale, flip or turn what is marked — or everything on the marked layers when nothing is marked. Enter applies, Escape cancels. (Ctrl+T)" />
+
+              <StackPanel Spacing="6" IsVisible="{Binding IsAnythingSelected}">
+                <Button Content="Transform selection"
+                        Command="{Binding TransformSelectionCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        ToolTip.Tip="Resize, flip or turn the marks themselves. The pixels underneath stay exactly where they are" />
+                <Button Content="{Binding MoveSelectionLabel}"
+                        Command="{Binding MoveSelectionCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        ToolTip.Tip="Lift the marked pixels so they can be dragged. Enter places them, Escape puts them back" />
+              </StackPanel>
+
               <Separator />
             </StackPanel>
 

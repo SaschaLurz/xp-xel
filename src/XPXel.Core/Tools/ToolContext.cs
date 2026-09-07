@@ -3,6 +3,7 @@ using XPXel.Core.Editing;
 using XPXel.Core.History;
 using XPXel.Core.Primitives;
 using XPXel.Core.Selection;
+using XPXel.Core.Text;
 
 namespace XPXel.Core.Tools;
 
@@ -29,7 +30,15 @@ public sealed class ToolContext
     /// <param name="workspace">The document being edited.</param>
     /// <param name="settings">The shared tool options.</param>
     /// <param name="colors">The primary and secondary colours.</param>
-    public ToolContext(DocumentWorkspace workspace, ToolSettings settings, ColorSlots colors)
+    /// <param name="textRasterizer">
+    /// The font engine, for the tools that have to measure or re-render words. Defaults to the
+    /// one that draws nothing, which is what a headless test gets.
+    /// </param>
+    public ToolContext(
+        DocumentWorkspace workspace,
+        ToolSettings settings,
+        ColorSlots colors,
+        ITextRasterizer? textRasterizer = null)
     {
         ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(settings);
@@ -38,6 +47,7 @@ public sealed class ToolContext
         Workspace = workspace;
         Settings = settings;
         Colors = colors;
+        TextRasterizer = textRasterizer ?? NullTextRasterizer.Instance;
     }
 
     /// <summary>The document being edited, together with its history and active layer.</summary>
@@ -48,6 +58,17 @@ public sealed class ToolContext
 
     /// <summary>The primary and secondary drawing colours.</summary>
     public ColorSlots Colors { get; }
+
+    /// <summary>
+    /// The font engine, for the tools and gestures that have to measure or re-render words.
+    /// </summary>
+    /// <remarks>
+    /// It sits on the context rather than being injected into each tool because two things that
+    /// are not the text tool need it: the move tool, which repositions a text layer by moving
+    /// its origin and re-rendering, and the canvas, which opens an edit when the artist
+    /// double-clicks a text layer with any tool at all in hand.
+    /// </remarks>
+    public ITextRasterizer TextRasterizer { get; }
 
     /// <summary>The document being edited.</summary>
     public PixelDocument Document => Workspace.Document;

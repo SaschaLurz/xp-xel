@@ -34,6 +34,7 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
     private readonly DocumentHistory _history;
     private WriteableBitmap? _thumbnail;
     private bool _isEditingName;
+    private bool _isMarked;
     private LayerDropPosition _dropPosition;
 
     /// <summary>Initialises the row.</summary>
@@ -54,6 +55,27 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
 
     /// <summary>The layer this row presents.</summary>
     public LayerNode Layer { get; }
+
+    /// <summary>
+    /// The other layers a change to this row should also reach, or <see langword="null"/> when
+    /// it should reach only this one.
+    /// </summary>
+    /// <remarks>
+    /// Supplied by <see cref="LayersViewModel"/>, which is the only thing that knows what is
+    /// marked. It answers with the whole marked set when this row is part of it, and with
+    /// nothing when it is not - so ticking the visibility box on an unmarked row is still an
+    /// ordinary single-layer change, however many rows happen to be highlighted elsewhere.
+    /// </remarks>
+    internal Func<LayerItemViewModel, IReadOnlyList<LayerNode>>? Peers { get; set; }
+
+    /// <summary>
+    /// Whether this row is part of the marked set, which is what the panel highlights.
+    /// </summary>
+    public bool IsMarked
+    {
+        get => _isMarked;
+        internal set => SetProperty(ref _isMarked, value);
+    }
 
     /// <summary>How deeply the layer is nested; the row indents by this much.</summary>
     public int Depth { get; }
@@ -84,21 +106,21 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
     public bool IsVisible
     {
         get => Layer.IsVisible;
-        set => Layer.IsVisible = value;
+        set => ApplyToPeers(layer => layer.IsVisible = value);
     }
 
     /// <summary>Whether the layer rejects edits.</summary>
     public bool IsLocked
     {
         get => Layer.IsLocked;
-        set => Layer.IsLocked = value;
+        set => ApplyToPeers(layer => layer.IsLocked = value);
     }
 
     /// <summary>The layer's opacity as a percentage, which is how artists think about it.</summary>
     public double OpacityPercent
     {
         get => Layer.Opacity * 100.0;
-        set => Layer.Opacity = value / 100.0;
+        set => ApplyToPeers(layer => layer.Opacity = value / 100.0);
     }
 
     /// <summary>The layer's blend mode. Changing it is recorded in the undo history.</summary>
@@ -112,8 +134,27 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            _history.Execute(new ChangeLayerPropertyCommand<BlendMode>(
-                "Change Blend Mode", Layer, mode => Layer.BlendMode = mode, Layer.BlendMode, value));
+            List<IUndoableCommand> changes = [];
+
+            foreach (LayerNode layer in Subjects())
+            {
+                LayerNode target = layer;
+
+                if (target.BlendMode != value)
+                {
+                    changes.Add(new ChangeLayerPropertyCommand<BlendMode>(
+                        "Change Blend Mode", target, mode => target.BlendMode = mode, target.BlendMode, value));
+                }
+            }
+
+            if (changes.Count == 0)
+            {
+                return;
+            }
+
+            _history.Execute(changes.Count == 1
+                ? changes[0]
+                : new CompositeCommand("Change Blend Mode", changes));
         }
     }
 
@@ -248,6 +289,29 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
 
     /// <inheritdoc />
     public void Dispose() => Layer.PropertyChanged -= OnLayerPropertyChanged;
+
+    /// <summary>Every layer a change made on this row should reach.</summary>
+    private IReadOnlyList<LayerNode> Subjects()
+    {
+        IReadOnlyList<LayerNode>? peers = Peers?.Invoke(this);
+        return peers is { Count: > 0 } ? peers : [Layer];
+    }
+
+    /// <summary>
+    /// Applies a change to this layer and to every other marked one.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes hiding six marked layers a single tick rather than six. It is written
+    /// as a loop over the layers rather than as a loop over the rows because a marked folder
+    /// has no row of its own for each child, and the change is meant for the folder itself.
+    /// </remarks>
+    private void ApplyToPeers(Action<LayerNode> apply)
+    {
+        foreach (LayerNode layer in Subjects())
+        {
+            apply(layer);
+        }
+    }
 
     private void OnLayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

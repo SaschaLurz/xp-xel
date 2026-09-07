@@ -26,6 +26,10 @@ namespace XPXel.Core.Editing;
 public sealed class DocumentWorkspace : ObservableModel
 {
     private LayerNode? _activeLayer;
+
+    /// <summary>Every layer marked in the layers panel; see <see cref="SelectedLayers"/>.</summary>
+    private LayerNode[] _selectedLayers = [];
+
     private Frame _activeFrame;
     private AnimationTag? _activeTag;
     private SelectionMask? _selection;
@@ -74,6 +78,113 @@ public sealed class DocumentWorkspace : ObservableModel
                 OnPropertyChanged(nameof(CanEditActiveLayer));
             }
         }
+    }
+
+    /// <summary>
+    /// Every layer marked in the layers panel, in the panel's own order.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Distinct from <see cref="ActiveLayer"/>, and larger than it.</b> One layer is always
+    /// the active one - the layer a stroke lands on, the layer the text panel styles - because
+    /// drawing has to have exactly one answer to "where does this go?". Marking several is a
+    /// second, weaker idea: these are the layers the next <em>structural</em> operation acts
+    /// on. Grouping, deleting, duplicating, transforming and copying all read this; every
+    /// drawing tool reads <see cref="ActiveLayer"/> and ignores it.
+    /// </para>
+    /// <para>
+    /// It is never empty while a layer is active: a panel with one row highlighted marks that
+    /// row, so every caller can read this and needs no separate "or else the active one" path.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<LayerNode> SelectedLayers => _selectedLayers;
+
+    /// <summary>Gets a value indicating whether more than one layer is marked.</summary>
+    public bool HasMultipleSelectedLayers => _selectedLayers.Length > 1;
+
+    /// <summary>Replaces the marked set.</summary>
+    /// <param name="layers">
+    /// The layers to mark. Anything that is not part of this document is dropped, and an empty
+    /// or <see langword="null"/> sequence falls back to the active layer.
+    /// </param>
+    public void SetSelectedLayers(IEnumerable<LayerNode>? layers)
+    {
+        List<LayerNode> marked = [];
+
+        foreach (LayerNode layer in layers ?? [])
+        {
+            if (Document.FindLayer(layer.Id) == layer && !marked.Contains(layer))
+            {
+                marked.Add(layer);
+            }
+        }
+
+        if (marked.Count == 0 && ActiveLayer is { } active)
+        {
+            marked.Add(active);
+        }
+
+        if (marked.Count == _selectedLayers.Length && marked.SequenceEqual(_selectedLayers))
+        {
+            return;
+        }
+
+        _selectedLayers = [.. marked];
+        OnPropertyChanged(nameof(SelectedLayers));
+        OnPropertyChanged(nameof(HasMultipleSelectedLayers));
+    }
+
+    /// <summary>
+    /// The marked layers' drawable leaves - raster and text layers - in document order,
+    /// bottom-most first.
+    /// </summary>
+    /// <returns>The leaves, which may be empty.</returns>
+    /// <remarks>
+    /// <para>
+    /// Marking a folder means marking what is inside it, which is what dragging a folder does
+    /// in every application that has folders, so groups are expanded rather than skipped.
+    /// Hidden and locked children are expanded too: what a folder contains does not change
+    /// with a visibility tick, and each caller decides for itself whether it may write to a
+    /// leaf it has been handed.
+    /// </para>
+    /// <para>
+    /// <b>Document order, not panel order.</b> The result is used to composite and to stamp,
+    /// and both are only correct bottom-most first - which is the order the document stores
+    /// layers in, and the reverse of the order the panel shows them in.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<LayerNode> GetSelectedLeaves()
+    {
+        if (_selectedLayers.Length == 0)
+        {
+            return ActiveLayer is RasterLayer or TextLayer ? [ActiveLayer] : [];
+        }
+
+        List<LayerNode> leaves = [];
+
+        foreach (LayerNode node in Document.EnumerateLayers())
+        {
+            if (node is RasterLayer or TextLayer && IsUnderAMarkedLayer(node))
+            {
+                leaves.Add(node);
+            }
+        }
+
+        return leaves;
+    }
+
+    /// <summary>Whether a layer is itself marked, or lies inside a marked folder.</summary>
+    private bool IsUnderAMarkedLayer(LayerNode node)
+    {
+        for (LayerNode? walk = node; walk is not null; walk = walk.Parent)
+        {
+            if (Array.IndexOf(_selectedLayers, walk) >= 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -252,6 +363,85 @@ public sealed class DocumentWorkspace : ObservableModel
         return true;
     }
 
+    /// <summary>
+    /// The free transform in progress, or <see langword="null"/> when nothing is being scaled,
+    /// flipped or turned.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a separate property from <see cref="ActiveTransform"/> rather than a mode of
+    /// it. A move is artwork in the hand and the whole canvas is somewhere to put it down; a
+    /// free transform is a box with eight handles, and the two want opposite things from every
+    /// press the canvas receives. Only one of them can be in progress at a time, which
+    /// <see cref="BeginFreeTransform"/> enforces by putting the other one down first.
+    /// </remarks>
+    public FreeTransform? ActiveFreeTransform
+    {
+        get => _activeFreeTransform;
+        private set => SetProperty(ref _activeFreeTransform, value);
+    }
+
+    /// <summary>Puts a transform box around the marked pixels, or the marked layers.</summary>
+    /// <param name="scope">Whether to transform the artwork or only the marching ants.</param>
+    /// <returns>
+    /// <see langword="true"/> if a box is now up, including when one already was and is left
+    /// alone rather than restarted.
+    /// </returns>
+    public bool BeginFreeTransform(FreeTransformScope scope = FreeTransformScope.Pixels)
+    {
+        if (ActiveFreeTransform is { } existing)
+        {
+            return existing.Scope == scope;
+        }
+
+        // Anything already floating goes down first. Two things cannot be in one hand, and of
+        // the two ways to resolve that, only putting the first down can be undone.
+        CommitTransform();
+
+        if (FreeTransform.Begin(this, scope) is not { } transform)
+        {
+            return false;
+        }
+
+        ActiveFreeTransform = transform;
+        return true;
+    }
+
+    /// <summary>
+    /// Applies the transform box, recording the whole episode as one history entry.
+    /// </summary>
+    /// <returns><see langword="true"/> if a box was up and it actually changed something.</returns>
+    public bool CommitFreeTransform()
+    {
+        if (ActiveFreeTransform is not { } transform)
+        {
+            return false;
+        }
+
+        // Cleared first, so anything reacting to the history push sees no transform in progress
+        // rather than one halfway through ending.
+        ActiveFreeTransform = null;
+
+        if (transform.Commit() is not { } command)
+        {
+            return false;
+        }
+
+        History.Push(command);
+        return true;
+    }
+
+    /// <summary>Abandons a transform, putting everything back as it was.</summary>
+    public void CancelFreeTransform()
+    {
+        if (ActiveFreeTransform is not { } transform)
+        {
+            return;
+        }
+
+        ActiveFreeTransform = null;
+        transform.Cancel();
+    }
+
     /// <summary>Abandons a move, putting the pixels back where they came from.</summary>
     public void CancelTransform()
     {
@@ -390,6 +580,7 @@ public sealed class DocumentWorkspace : ObservableModel
     public bool HasUnsavedChanges => !History.IsAtSavedState;
 
     private SelectionTransform? _activeTransform;
+    private FreeTransform? _activeFreeTransform;
 
     /// <summary>
     /// Returns the cel the active layer occupies on the active frame, creating it on first
@@ -498,7 +689,7 @@ public sealed class DocumentWorkspace : ObservableModel
     }
 
     /// <summary>
-    /// Clears every marked pixel on the active layer, as one undoable step.
+    /// Clears every marked pixel, on every marked layer, as one undoable step.
     /// </summary>
     /// <param name="actionName">
     /// What the history entry is called. Cutting erases exactly as deleting does, and the only
@@ -526,32 +717,62 @@ public sealed class DocumentWorkspace : ObservableModel
     {
         ArgumentException.ThrowIfNullOrEmpty(actionName);
 
-        if (Selection is not { IsEmpty: false } selection || GetOrCreateActiveCel() is not { } cel)
+        if (Selection is not { IsEmpty: false } selection)
         {
             return false;
         }
 
-        // The session is handed the selection, so it clips the writes for us and a mark that
-        // extends past the canvas edge simply has no effect there.
-        RasterEditSession session = RasterEditSession.Begin(Document, cel, actionName, selection);
         ImageRect region = selection.Bounds.Intersect(Document.Bounds);
 
-        for (int y = region.Top; y < region.Bottom; y++)
+        if (region.Width <= 0 || region.Height <= 0)
         {
-            for (int x = region.Left; x < region.Right; x++)
+            return false;
+        }
+
+        List<IUndoableCommand> erasures = [];
+
+        foreach (LayerNode leaf in GetSelectedLeaves())
+        {
+            // A locked or hidden layer is skipped rather than refused. With several layers
+            // marked the artist means "clear this out of my drawing", and stopping the whole
+            // operation because one of them happens to be locked would be an answer to a
+            // question nobody asked. Text layers are skipped for a harder reason: their pixels
+            // are regenerated from the words, so a hole punched in one would heal itself the
+            // next time anything re-rendered it.
+            if (leaf is not RasterLayer { IsLocked: false } layer || !layer.IsEffectivelyVisible)
             {
-                session.SetPixel(x, y, PixelColor.Transparent);
+                continue;
+            }
+
+            Cel cel = Document.GetOrCreateCel(layer, ActiveFrame);
+
+            // The session is handed the selection, so it clips the writes for us and a mark
+            // that extends past the canvas edge simply has no effect there.
+            RasterEditSession session = RasterEditSession.Begin(Document, cel, actionName, selection);
+
+            for (int y = region.Top; y < region.Bottom; y++)
+            {
+                for (int x = region.Left; x < region.Right; x++)
+                {
+                    session.SetPixel(x, y, PixelColor.Transparent);
+                }
+            }
+
+            if (session.Commit() is { } command)
+            {
+                erasures.Add(command);
             }
         }
 
-        if (session.Commit() is not { } command)
+        if (erasures.Count == 0)
         {
             return false;
         }
 
-        // The pixels are already cleared by the time the command exists, so it is recorded
-        // rather than executed.
-        History.Push(command);
+        // The pixels are already cleared by the time the commands exist, so they are recorded
+        // rather than executed - and as one entry, because one keystroke should cost one undo
+        // however many layers it reached.
+        History.Push(erasures.Count == 1 ? erasures[0] : new CompositeCommand(actionName, erasures));
         return true;
     }
 

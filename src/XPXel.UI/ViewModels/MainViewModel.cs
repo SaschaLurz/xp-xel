@@ -11,6 +11,7 @@ using XPXel.Core.Editing;
 using XPXel.Core.History;
 using XPXel.Core.Primitives;
 using XPXel.Core.Selection;
+using XPXel.Core.Text;
 using XPXel.Core.Tools;
 
 // Both XP-xel and Dock have an ITool: one is a drawing tool, the other a docked panel.
@@ -60,6 +61,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly DockLayoutStore _layoutStore;
     private readonly LayoutPresetStore _layoutPresets;
     private readonly ClipboardService _clipboard;
+
+    /// <summary>
+    /// The font engine, handed to every document's <see cref="ToolContext"/>.
+    /// </summary>
+    /// <remarks>
+    /// Without it a context falls back to the rasteriser that draws nothing, and anything that
+    /// re-renders a text layer through the context - the move tool, a double-click that opens
+    /// text for editing - silently wipes the glyphs it was supposed to redraw.
+    /// </remarks>
+    private readonly ITextRasterizer _textRasterizer;
     private readonly AutosaveService _autosave;
     private readonly AnimationExportService _animationExport;
     private readonly AnimationExportRegistry _animationFormats;
@@ -109,7 +120,8 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         AnimationExportRegistry animationFormats,
         AutosaveService autosave,
         HistoryPanelViewModel history,
-        ClipboardService clipboard)
+        ClipboardService clipboard,
+        ITextRasterizer textRasterizer)
     {
         ArgumentNullException.ThrowIfNull(toolbox);
         ArgumentNullException.ThrowIfNull(layers);
@@ -131,6 +143,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(autosave);
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(clipboard);
+        ArgumentNullException.ThrowIfNull(textRasterizer);
 
         Toolbox = toolbox;
         Layers = layers;
@@ -149,6 +162,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _animationFormats = animationFormats;
         _autosave = autosave;
         _clipboard = clipboard;
+        _textRasterizer = textRasterizer;
 
         Timeline = timeline;
         Preview = preview;
@@ -846,16 +860,16 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Picks the selected pixels up so they can be dragged, or puts them down if they are
-    /// already up.
+    /// Lifts the marked pixels so they can be dragged, or puts them down again.
     /// </summary>
     /// <remarks>
-    /// One key for both halves, the way Photoshop's free transform works: Ctrl+T lifts the
-    /// selection, and Ctrl+T again commits it. Enter also commits and Escape abandons, both
-    /// handled by the canvas, which is where the artist's attention is.
+    /// The plain move, kept beside the transform because they are different requests. This one
+    /// takes the marked pixels off the layer and hands them to the artist to place; the
+    /// transform puts a box round them and resizes it. Conflating the two would mean every
+    /// nudge of a sprite by one pixel went through a box with eight handles.
     /// </remarks>
     [RelayCommand]
-    private void FreeTransform()
+    private void MoveSelectedPixels()
     {
         if (ActiveDocument?.Workspace is not { } workspace)
         {
@@ -870,8 +884,70 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         }
 
         StatusMessage = workspace.BeginTransform()
-            ? "Drag the selected pixels, or nudge them with the arrow keys. Enter to place, Escape to cancel"
-            : "Select some pixels with the marquee tool first";
+            ? "Drag the marked pixels, or nudge them with the arrow keys. Enter to place, Escape to cancel"
+            : "Mark some pixels with the marquee tool first";
+    }
+
+    /// <summary>
+    /// Puts a transform box around the artwork, or applies the box that is already up.
+    /// </summary>
+    /// <remarks>
+    /// One key for both halves, the way a free transform works everywhere: Ctrl+T opens the box
+    /// and Ctrl+T again applies it. Enter also applies and Escape abandons, both handled by the
+    /// canvas, which is where the artist is looking.
+    /// </remarks>
+    [RelayCommand]
+    private void FreeTransform() => RunTransform(FreeTransformScope.Pixels);
+
+    /// <summary>
+    /// Puts a transform box around the marching ants alone, leaving the artwork where it is.
+    /// </summary>
+    /// <remarks>
+    /// The other half of a pair that only makes sense together. Marking a shape and then finding
+    /// it is the wrong size is common, and without this the only remedy is to mark it again from
+    /// scratch. Nothing under the marks is touched: this resamples the mask and stops.
+    /// </remarks>
+    [RelayCommand]
+    private void TransformSelection() => RunTransform(FreeTransformScope.Marks);
+
+    /// <summary>Opens a transform box, or applies the one already up.</summary>
+    private void RunTransform(FreeTransformScope scope)
+    {
+        if (ActiveDocument?.Workspace is not { } workspace)
+        {
+            return;
+        }
+
+        if (workspace.ActiveFreeTransform is { } box)
+        {
+            bool changed = box.HasChanges;
+            string size = box.Describe();
+
+            workspace.CommitFreeTransform();
+            StatusMessage = changed ? $"Transformed — {size}" : "Transform applied, nothing changed";
+            return;
+        }
+
+        // Anything already floating goes down first, so Ctrl+T straight after a paste transforms
+        // what was pasted rather than refusing because the artist's hands are full.
+        workspace.CommitTransform();
+
+        if (workspace.BeginFreeTransform(scope))
+        {
+            StatusMessage = scope == FreeTransformScope.Marks
+                ? "Drag the handles to reshape the marks. R turns, H and V flip, Enter applies, Escape cancels"
+                : "Drag the handles to scale, Shift to keep the proportions. R turns, H and V flip, Enter applies, Escape cancels";
+
+            return;
+        }
+
+        StatusMessage = scope switch
+        {
+            FreeTransformScope.Marks => "Mark something first — there is nothing to reshape",
+            _ when workspace.ActiveLayer is TextLayer =>
+                "Text layers cannot be transformed — their pixels are re-made from the words every time they change",
+            _ => "Nothing to transform — mark some pixels, or pick a layer with artwork on it",
+        };
     }
 
     /// <summary>Shows the folder the autosaved backups are kept in.</summary>
@@ -1140,7 +1216,11 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>Creates a tab for a workspace and brings it to the front.</summary>
     private void AddDocument(DocumentWorkspace workspace, IStorageFile? file)
     {
-        EditorDocument document = new(workspace, new ToolContext(workspace, _toolSettings, _colors), CanvasSettings, Toolbox)
+        EditorDocument document = new(
+            workspace,
+            new ToolContext(workspace, _toolSettings, _colors, _textRasterizer),
+            CanvasSettings,
+            Toolbox)
         {
             File = file,
         };

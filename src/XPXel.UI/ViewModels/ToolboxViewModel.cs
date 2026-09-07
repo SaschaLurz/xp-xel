@@ -134,6 +134,24 @@ public sealed partial class ToolboxViewModel : ViewModelBase
     public bool HasToolOptions =>
         ((SelectedTool?.Options ?? ToolOptions.None) & ~ToolOptions.Selection) != ToolOptions.None;
 
+    /// <summary>Selects a tool by its identifier.</summary>
+    /// <param name="id">The tool's stable identifier.</param>
+    /// <returns><see langword="true"/> if that tool exists and is now in hand.</returns>
+    /// <remarks>
+    /// For the gestures that imply a tool rather than name one - double-clicking text, which
+    /// needs the text tool whatever the artist was holding a moment ago.
+    /// </remarks>
+    public bool TrySelectById(string id)
+    {
+        if (Tools.FirstOrDefault(t => string.Equals(t.Tool.Id, id, StringComparison.Ordinal)) is not { } match)
+        {
+            return false;
+        }
+
+        SelectedTool = match;
+        return true;
+    }
+
     /// <summary>Selects the tool bound to a single-key shortcut.</summary>
     /// <param name="key">The key that was pressed, as a one-character string.</param>
     /// <returns><see langword="true"/> if a tool claimed the key.</returns>

@@ -31,10 +31,17 @@
     <!-- ================================================================================
          The stack
          ================================================================================ -->
+    <!-- Multiple selection, so a Ctrl-click adds a layer to the marked set and a Shift-click
+         takes a run of them. What is marked is what the folder, bin and duplicate buttons act
+         on, what a drag carries, and what Ctrl+C and Ctrl+T read - the panel is the only place
+         "these layers" can be said. AlwaysSelected keeps one row marked, since every drawing
+         tool needs an active layer to write to. -->
     <ListBox Grid.Row="1"
              x:Name="LayerList"
              ItemsSource="{Binding Layers}"
              SelectedItem="{Binding SelectedLayer, Mode=TwoWay}"
+             SelectionMode="Multiple,AlwaysSelected"
+             SelectionChanged="OnListSelectionChanged"
              Background="Transparent"
              BorderThickness="0"
              MinHeight="140">
@@ -171,12 +178,22 @@
     </ListBox>
 
     <!-- ================================================================================
-         Properties of the selected layer
+         Properties of the selected layer.
+
+         With several rows marked these still show the selected one, but setting them applies
+         to every marked layer - see LayerItemViewModel.ApplyToPeers. The note below says so,
+         because a slider that silently moves six layers would otherwise be a nasty surprise.
          ================================================================================ -->
     <StackPanel Grid.Row="2"
                 Margin="8,6"
                 Spacing="4"
                 IsVisible="{Binding SelectedLayer, Converter={x:Static ObjectConverters.IsNotNull}}">
+
+      <TextBlock Classes="subtle"
+                 FontSize="11"
+                 TextWrapping="Wrap"
+                 IsVisible="{Binding HasMultipleMarkedRows}"
+                 Text="Applies to every marked layer." />
 
       <Grid ColumnDefinitions="Auto,*,Auto" DataContext="{Binding SelectedLayer}"
             x:DataType="vm:LayerItemViewModel">

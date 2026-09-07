@@ -46,6 +46,17 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     private PixelDocument? _observedDocument;
     private bool _isRebuilding;
 
+    /// <summary>
+    /// Every highlighted row, the selected one included.
+    /// </summary>
+    /// <remarks>
+    /// Kept here rather than read from the list box on demand, because every operation that
+    /// consults it - a drop, a delete, a visibility tick - happens while the list box is busy
+    /// with a gesture of its own, and asking it mid-gesture gets an answer that is halfway
+    /// through changing.
+    /// </remarks>
+    private readonly List<LayerItemViewModel> _markedRows = [];
+
     /// <summary>Initialises the panel.</summary>
     public LayersViewModel()
     {
@@ -55,6 +66,77 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty]
     private LayerItemViewModel? _selectedLayer;
+
+    /// <summary>Every highlighted row: what a structural operation acts on.</summary>
+    public IReadOnlyList<LayerItemViewModel> MarkedRows => _markedRows;
+
+    /// <summary>Gets a value indicating whether more than one row is highlighted.</summary>
+    public bool HasMultipleMarkedRows => _markedRows.Count > 1;
+
+    /// <summary>
+    /// Replaces the highlighted set, which the list box reports whenever it changes.
+    /// </summary>
+    /// <param name="rows">The rows now highlighted.</param>
+    /// <remarks>
+    /// The workspace is told as well, because copying, cutting and transforming all read the
+    /// marked layers from there and the panel is the only thing that knows what they are.
+    /// </remarks>
+    public void SetMarkedRows(IEnumerable<LayerItemViewModel>? rows)
+    {
+        foreach (LayerItemViewModel row in _markedRows)
+        {
+            row.IsMarked = false;
+        }
+
+        _markedRows.Clear();
+
+        foreach (LayerItemViewModel row in rows ?? [])
+        {
+            if (!_markedRows.Contains(row))
+            {
+                _markedRows.Add(row);
+                row.IsMarked = true;
+            }
+        }
+
+        _workspace?.SetSelectedLayers(_markedRows.Select(row => row.Layer));
+
+        OnPropertyChanged(nameof(MarkedRows));
+        OnPropertyChanged(nameof(HasMultipleMarkedRows));
+        NotifyCommandsCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// The rows an operation should act on, given the row it was aimed at.
+    /// </summary>
+    /// <param name="row">
+    /// The row the gesture named - the one dragged, or the one right-clicked - or
+    /// <see langword="null"/> when it came from a button and means the selection.
+    /// </param>
+    /// <returns>The rows to act on, in the panel order, never empty unless nothing is selected.</returns>
+    /// <remarks>
+    /// The rule every file manager uses: dragging one of several highlighted items brings all of
+    /// them, and dragging an item that is not highlighted brings only itself. Anything else
+    /// makes a careless drag destroy work the artist could not see they had selected.
+    /// </remarks>
+    public IReadOnlyList<LayerItemViewModel> GetTargets(LayerItemViewModel? row)
+    {
+        if (row is null)
+        {
+            return _markedRows.Count > 0 ? [.. _markedRows] : SelectedLayer is { } only ? [only] : [];
+        }
+
+        return _markedRows.Contains(row) ? [.. _markedRows] : [row];
+    }
+
+    /// <summary>Puts a set of rows into document order, bottom-most first.</summary>
+    /// <remarks>
+    /// The panel shows the stack upside down, so its own order is the reverse of the one every
+    /// document operation needs. Sorting by the row index and reversing is exact, and cheaper
+    /// than walking the layer tree for each comparison.
+    /// </remarks>
+    private List<LayerItemViewModel> InDocumentOrder(IEnumerable<LayerItemViewModel> rows) =>
+        [.. rows.OrderByDescending(Layers.IndexOf)];
 
     /// <summary>The layers, top-most first.</summary>
     public ObservableCollection<LayerItemViewModel> Layers { get; } = [];
@@ -125,23 +207,51 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private void DuplicateLayer(LayerItemViewModel? row)
     {
-        if (_workspace is not { } workspace || (row ?? SelectedLayer) is not { } selected)
+        if (_workspace is not { } workspace || GetTargets(row) is not { Count: > 0 } targets)
         {
             return;
         }
 
         PixelDocument document = workspace.Document;
-        LayerNode source = selected.Layer;
+        List<IUndoableCommand> copies = [];
+        LayerNode? last = null;
 
-        // DuplicateLayer both copies the cels and inserts the layer, so the copy is removed
-        // again and handed to the command, which owns putting it back on redo.
-        LayerNode copy = document.DuplicateLayer(source, $"{source.Name} copy");
-        IReadOnlyList<Cel> cels = document.RemoveLayer(copy);
+        foreach (LayerItemViewModel target in InDocumentOrder(targets))
+        {
+            LayerNode source = target.Layer;
 
-        workspace.History.Execute(new AddLayerCommand(
-            "Duplicate Layer", document, copy, source.Parent ?? document.Root, source.Parent!.IndexOf(source) + 1, cels));
+            if (source.Parent is not { } parent)
+            {
+                continue;
+            }
 
-        SelectLayer(copy);
+            // DuplicateLayer both copies the cels and inserts the layer, so the copy is removed
+            // again and handed to the command, which owns putting it back on redo.
+            LayerNode copy = document.DuplicateLayer(source, $"{source.Name} copy");
+            IReadOnlyList<Cel> cels = document.RemoveLayer(copy);
+
+            AddLayerCommand command = new(
+                "Duplicate Layer", document, copy, parent, parent.IndexOf(source) + 1, cels);
+
+            command.Redo();
+            copies.Add(command);
+            last = copy;
+        }
+
+        if (copies.Count == 0)
+        {
+            return;
+        }
+
+        // The copies are already in the document, so the entry is recorded rather than run.
+        workspace.History.Push(copies.Count == 1
+            ? copies[0]
+            : new CompositeCommand("Duplicate Layers", copies));
+
+        if (last is not null)
+        {
+            SelectLayer(last);
+        }
     }
 
     /// <summary>Deletes a layer. The last remaining top-level layer cannot be deleted.</summary>
@@ -154,19 +264,40 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     [RelayCommand(CanExecute = nameof(CanDeleteLayer))]
     private void DeleteLayer(LayerItemViewModel? row)
     {
-        if (_workspace is not { } workspace || (row ?? SelectedLayer) is not { } target)
+        if (_workspace is not { } workspace || GetTargets(row) is not { Count: > 0 } targets)
         {
             return;
         }
 
-        // The guard is repeated here rather than left to CanExecute, because a drop invokes
-        // the command directly and CanExecute only ever considers the selected layer.
-        if (!CanDelete(workspace, target))
+        List<IUndoableCommand> removals = [];
+
+        // Top-most first, so that a folder is removed before anything inside it is reached and
+        // the child is quietly skipped rather than removed twice.
+        foreach (LayerItemViewModel target in InDocumentOrder(targets).AsEnumerable().Reverse())
+        {
+            // The guard is repeated here rather than left to CanExecute, because a drop invokes
+            // the command directly and CanExecute only ever considers the selected layer. It is
+            // asked again per layer, since deleting the first of them can make the second the
+            // last top-level layer there is.
+            if (target.Layer.Parent is null || !CanDelete(workspace, target))
+            {
+                continue;
+            }
+
+            RemoveLayerCommand command = new("Delete Layer", workspace.Document, target.Layer);
+            command.Redo();
+            removals.Add(command);
+        }
+
+        if (removals.Count == 0)
         {
             return;
         }
 
-        workspace.History.Execute(new RemoveLayerCommand("Delete Layer", workspace.Document, target.Layer));
+        workspace.History.Push(removals.Count == 1
+            ? removals[0]
+            : new CompositeCommand("Delete Layers", removals));
+
         SelectedLayer = Layers.FirstOrDefault();
     }
 
@@ -197,15 +328,27 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     [RelayCommand(CanExecute = nameof(HasSelection))]
     private void GroupIntoFolder(LayerItemViewModel? row)
     {
-        if (_workspace is not { } workspace || (row ?? SelectedLayer) is not { } target)
+        if (_workspace is not { } workspace || GetTargets(row) is not { Count: > 0 } targets)
+        {
+            return;
+        }
+
+        List<LayerNode> layers = [.. InDocumentOrder(targets).Select(item => item.Layer).Where(layer => layer.Parent is not null)];
+
+        if (layers.Count == 0)
         {
             return;
         }
 
         GroupLayer folder = new(Guid.NewGuid(), NextFolderName(workspace.Document));
-        workspace.History.Execute(new GroupLayersCommand("Group Layer", workspace.Document, folder, target.Layer));
 
-        SelectLayer(target.Layer);
+        workspace.History.Execute(new GroupLayersCommand(
+            layers.Count == 1 ? "Group Layer" : "Group Layers",
+            workspace.Document,
+            folder,
+            layers));
+
+        SelectLayer(folder);
     }
 
     /// <summary>Moves a layer into a folder, on top of whatever the folder already holds.</summary>
@@ -216,28 +359,53 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(folder);
 
-        if (_workspace is not { } workspace
-            || folder.Layer is not GroupLayer group
-            || ReferenceEquals(source, folder))
+        if (_workspace is not { } workspace || folder.Layer is not GroupLayer group)
         {
             return;
         }
 
-        // Dropping a folder inside itself, or inside one of its own descendants, would
-        // detach that whole subtree from the document. GroupLayer refuses it as well, but
-        // stopping here avoids pushing a command that would throw when redone.
-        if (source.Layer is GroupLayer dragged && IsDescendantOf(group, dragged))
+        List<IUndoableCommand> moves = [];
+        LayerNode? last = null;
+
+        foreach (LayerItemViewModel target in InDocumentOrder(GetTargets(source)))
+        {
+            if (ReferenceEquals(target, folder))
+            {
+                continue;
+            }
+
+            // Dropping a folder inside itself, or inside one of its own descendants, would
+            // detach that whole subtree from the document. GroupLayer refuses it as well, but
+            // stopping here avoids pushing a command that would throw when redone.
+            if (target.Layer is GroupLayer dragged && IsDescendantOf(group, dragged))
+            {
+                continue;
+            }
+
+            // The top of a folder as displayed is its highest index, because the panel shows
+            // the stack in reverse. Dropping onto a folder therefore lands the layers on top of
+            // its contents, which is where an artist expects newly added layers to go.
+            MoveLayerCommand command = new(
+                "Move Into Folder", workspace.Document, target.Layer, group, group.Children.Count);
+
+            command.Redo();
+            moves.Add(command);
+            last = target.Layer;
+        }
+
+        if (moves.Count == 0)
         {
             return;
         }
 
-        // The top of a folder as displayed is its highest index, because the panel shows the
-        // stack in reverse. Dropping onto a folder therefore lands the layer on top of its
-        // contents, which is where an artist expects a newly added layer to go.
-        workspace.History.Execute(new MoveLayerCommand(
-            "Move Into Folder", workspace.Document, source.Layer, group, group.Children.Count));
+        workspace.History.Push(moves.Count == 1
+            ? moves[0]
+            : new CompositeCommand("Move Into Folder", moves));
 
-        SelectLayer(source.Layer);
+        if (last is not null)
+        {
+            SelectLayer(last);
+        }
     }
 
     /// <summary>Moves the selected layer one position up the stack.</summary>
@@ -403,6 +571,7 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     private void Rebuild()
     {
         Guid? previousSelection = SelectedLayer?.Layer.Id;
+        HashSet<Guid> previousMarks = [.. _markedRows.Select(row => row.Layer.Id)];
 
         _isRebuilding = true;
         try
@@ -423,6 +592,16 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
             _isRebuilding = false;
         }
 
+        // The rows are new objects, so the marked set is re-found by layer identity. Layers that
+        // no longer exist simply drop out, which is what a marked layer that was just deleted
+        // should do.
+        SetMarkedRows(Layers.Where(row => previousMarks.Contains(row.Layer.Id)));
+
+        if (_markedRows.Count == 0 && SelectedLayer is { } fallback)
+        {
+            SetMarkedRows([fallback]);
+        }
+
         // Selection was assigned while suppressed, so push it to the workspace now.
         ApplySelectionToWorkspace();
         NotifyCommandsCanExecuteChanged();
@@ -438,7 +617,7 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         for (int i = group.Children.Count - 1; i >= 0; i--)
         {
             LayerNode child = group.Children[i];
-            Layers.Add(new LayerItemViewModel(child, history, depth));
+            Layers.Add(new LayerItemViewModel(child, history, depth) { Peers = GetPeerLayers });
 
             if (child is GroupLayer nested)
             {
@@ -497,9 +676,27 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // A row selected by anything other than the list box - adding a layer, dropping one,
+        // an undo - has no marked set behind it, so it becomes the marked set. The list box
+        // reports its own changes through SetMarkedRows and this leaves those alone.
+        if (value is not null && !_markedRows.Contains(value))
+        {
+            SetMarkedRows([value]);
+        }
+
         ApplySelectionToWorkspace();
         NotifyCommandsCanExecuteChanged();
     }
+
+    /// <summary>
+    /// Answers a row asking which other layers a change to it should reach.
+    /// </summary>
+    /// <remarks>
+    /// The whole marked set when the row is part of it, and nothing when it is not. See
+    /// <see cref="LayerItemViewModel.Peers"/>.
+    /// </remarks>
+    private IReadOnlyList<LayerNode> GetPeerLayers(LayerItemViewModel row) =>
+        _markedRows.Contains(row) ? [.. _markedRows.Select(marked => marked.Layer)] : [];
 
     private void NotifyCommandsCanExecuteChanged()
     {

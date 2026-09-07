@@ -1,4 +1,5 @@
 using XPXel.Core.Documents;
+using XPXel.Core.Imaging;
 using XPXel.Core.Primitives;
 using XPXel.Core.Selection;
 
@@ -90,24 +91,39 @@ public sealed class PixelClip
     public bool IsEmpty => Array.TrueForAll(_coverage, c => c == 0);
 
     /// <summary>
-    /// Copies whatever is marked on a document's active layer.
+    /// Copies whatever is marked, on whichever layers are marked.
     /// </summary>
     /// <param name="workspace">The document to copy from.</param>
     /// <returns>
     /// The clip, or <see langword="null"/> when there is nothing to copy: no selection, an
-    /// empty one, or a layer with nothing on this frame.
+    /// empty one, or marked layers with nothing on this frame.
     /// </returns>
     /// <remarks>
-    /// The pixels come from the active layer alone rather than from the flattened image. That
-    /// is what "copy" means on a layered document — the artist chose which layer they are
-    /// working on, and quietly copying the composite would bring along a background they did
-    /// not ask for and could not then separate again.
+    /// <para>
+    /// <b>The marked layers, not the flattened picture.</b> The artist said which layers they
+    /// meant by marking them in the panel, and copying the composite instead would bring along
+    /// a background they did not ask for and could not then separate again. One marked layer -
+    /// the ordinary case - copies that layer's own pixels, alpha and all.
+    /// </para>
+    /// <para>
+    /// <b>Several marked layers are flattened together</b>, bottom-most first, honouring
+    /// visibility and opacity: what the artist sees across those layers is what lands on the
+    /// clipboard. A clip is one rectangle of pixels and has nowhere to keep a stack, and the
+    /// alternative - copying only the top-most - would silently throw away most of what was
+    /// marked.
+    /// </para>
+    /// <para>
+    /// <b>Blend modes are not applied.</b> A Multiply layer darkens what is beneath it, and
+    /// the artwork beneath it is precisely what a copy leaves behind, so there would be
+    /// nothing to multiply against. Every marked layer is composited plainly over the ones
+    /// below it inside the clip.
+    /// </para>
     /// </remarks>
     public static PixelClip? FromSelection(DocumentWorkspace workspace)
     {
         ArgumentNullException.ThrowIfNull(workspace);
 
-        if (workspace.Selection is not { IsEmpty: false } selection || workspace.FindActiveCel() is not { } cel)
+        if (workspace.Selection is not { IsEmpty: false } selection)
         {
             return null;
         }
@@ -115,6 +131,11 @@ public sealed class PixelClip
         ImageRect source = selection.Bounds.Intersect(workspace.Document.Bounds);
 
         if (source.Width <= 0 || source.Height <= 0)
+        {
+            return null;
+        }
+
+        if (CollectSources(workspace) is not { Count: > 0 } sources)
         {
             return null;
         }
@@ -139,12 +160,75 @@ public sealed class PixelClip
                 }
 
                 coverage[index] = covered;
-                pixels[index] = cel.Pixels.GetPixelOrTransparent(sx - cel.Offset.X, sy - cel.Offset.Y);
+                pixels[index] = Flatten(sources, sx, sy);
                 any = true;
             }
         }
 
         return any ? new PixelClip(source.Size, pixels, coverage, new ImagePoint(source.Left, source.Top)) : null;
+    }
+
+    /// <summary>
+    /// Gathers the cels a copy should read, bottom-most first.
+    /// </summary>
+    /// <remarks>
+    /// A single marked layer is taken whatever its state, because the artist pointed straight
+    /// at it; copying a hidden layer they deliberately selected is not a surprise. Once several
+    /// are marked the question changes to "what does this look like", so the hidden ones drop
+    /// out - they contribute nothing to what is on screen, and flattening them in would put
+    /// pixels on the clipboard that are nowhere to be seen in the picture.
+    /// </remarks>
+    private static List<(Cel Cel, double Opacity)> CollectSources(DocumentWorkspace workspace)
+    {
+        IReadOnlyList<LayerNode> leaves = workspace.GetSelectedLeaves();
+        bool alone = leaves.Count == 1;
+
+        List<(Cel Cel, double Opacity)> sources = [];
+
+        foreach (LayerNode leaf in leaves)
+        {
+            if (!alone && (!leaf.IsEffectivelyVisible || leaf.Opacity <= 0.0))
+            {
+                continue;
+            }
+
+            if (workspace.Document.Cels.Find(leaf.Id, workspace.ActiveFrame.Id) is { } cel)
+            {
+                sources.Add((cel, alone ? 1.0 : leaf.Opacity));
+            }
+        }
+
+        return sources;
+    }
+
+    /// <summary>Composites one document pixel down through the marked cels.</summary>
+    private static PixelColor Flatten(List<(Cel Cel, double Opacity)> sources, int x, int y)
+    {
+        // The single-layer case is the overwhelmingly common one, and it must return the
+        // layer's own pixel untouched rather than the same pixel composited over nothing:
+        // source-over against a transparent backdrop is a round trip through the blend
+        // arithmetic that a half-transparent pixel does not survive exactly.
+        if (sources.Count == 1)
+        {
+            (Cel only, _) = sources[0];
+            return only.Pixels.GetPixelOrTransparent(x - only.Offset.X, y - only.Offset.Y);
+        }
+
+        PixelColor result = PixelColor.Transparent;
+
+        foreach ((Cel cel, double opacity) in sources)
+        {
+            PixelColor above = cel.Pixels.GetPixelOrTransparent(x - cel.Offset.X, y - cel.Offset.Y);
+
+            if (opacity < 1.0)
+            {
+                above = above.WithAlpha((byte)Math.Clamp(Math.Round(above.A * opacity), 0.0, 255.0));
+            }
+
+            result = ColorBlending.SourceOver(above, result);
+        }
+
+        return result;
     }
 
     /// <summary>
