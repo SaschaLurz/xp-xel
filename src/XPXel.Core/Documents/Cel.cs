@@ -128,6 +128,52 @@ public sealed class Cel : ObservableModel
     }
 
     /// <summary>
+    /// Creates a copy of this cel whose buffer is large enough to hold a given rectangle,
+    /// without moving anything already in it.
+    /// </summary>
+    /// <param name="required">The region that must be writable, in document coordinates.</param>
+    /// <param name="canvas">The canvas the result must still cover.</param>
+    /// <returns>
+    /// A new cel with the same identity and a larger buffer, or this one when the buffer is
+    /// already big enough.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is what stops a transform from cutting the artwork off at the canvas edge.
+    /// <see cref="CreateMoved"/> already keeps whatever a <em>move</em> pushes over the side,
+    /// because it knows in advance where the pixels are going; a transform does not, since the
+    /// box can be dragged anywhere and resized on the way. So it grows the buffer at the moment
+    /// it places the artwork, and everything hanging over the edge is kept exactly as a moved
+    /// layer's is — invisible until the canvas grows or the artwork is dragged back.
+    /// </para>
+    /// <para>
+    /// Returning <see langword="this"/> when nothing needs to change matters: the caller uses
+    /// the identity of the result to decide whether the swap has to be recorded in the history
+    /// at all.
+    /// </para>
+    /// </remarks>
+    public Cel CreateExpanded(ImageRect required, ImageRect canvas)
+    {
+        ImageRect current = Bounds;
+
+        if (required.IsEmpty || current.Contains(required))
+        {
+            return this;
+        }
+
+        ImageRect target = current.Union(canvas).Union(required);
+
+        PixelBuffer grown = new(target.Size);
+        Pixels.CopyRegionTo(Pixels.Bounds, grown, new ImagePoint(Offset.X - target.X, Offset.Y - target.Y));
+
+        return new Cel(LayerId, FrameId, grown)
+        {
+            Offset = new ImagePoint(target.X, target.Y),
+            Opacity = Opacity,
+        };
+    }
+
+    /// <summary>
     /// Creates a copy of this cel's content under a different layer and frame identity.
     /// </summary>
     /// <param name="layerId">The identity of the layer the copy belongs to.</param>

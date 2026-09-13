@@ -82,6 +82,7 @@ public sealed class EditorDocument : Document
         MoveSelectionCommand = new RelayCommand(ToggleSelectionMove);
         TransformCommand = new RelayCommand(() => ToggleTransform(FreeTransformScope.Pixels));
         TransformSelectionCommand = new RelayCommand(() => ToggleTransform(FreeTransformScope.Marks));
+        DeleteMarkedCommand = new RelayCommand(DeleteMarked);
 
         UpdateTitle();
     }
@@ -122,6 +123,15 @@ public sealed class EditorDocument : Document
     /// </summary>
     [JsonIgnore]
     public ICommand TransformSelectionCommand { get; }
+
+    /// <summary>Clears the marked pixels on every marked layer.</summary>
+    /// <remarks>
+    /// The same thing Delete and Backspace do. It is here as well because the keys are
+    /// invisible: an artist who has just marked something with the wand has the pointer on the
+    /// canvas and the menu one click away, and "how do I get rid of this?" should not require
+    /// having read a shortcut list.
+    /// </remarks>
+    public ICommand DeleteMarkedCommand { get; }
 
     /// <summary>Gets a value indicating whether a transform box is up right now.</summary>
     [JsonIgnore]
@@ -253,6 +263,9 @@ public sealed class EditorDocument : Document
 
         Workspace.BeginFreeTransform(scope);
     }
+
+    /// <summary>Clears the marked pixels, exactly as Delete and Backspace do.</summary>
+    private void DeleteMarked() => Workspace.EraseSelection();
 
     /// <summary>Lifts the marked pixels, or places them if they are already lifted.</summary>
     private void ToggleSelectionMove()

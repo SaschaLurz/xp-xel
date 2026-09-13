@@ -240,6 +240,40 @@
   </Style>
 
   <!-- The modal overlay behind a dialog. -->
+  <!-- The one button in a menu that destroys work. Tinted rather than shouted at: it has to
+       be told apart from the entries above it at a glance, without turning every context menu
+       into a warning sign. -->
+  <Style Selector="Button.destructive">
+    <Setter Property="Foreground" Value="{DynamicResource XpDangerBrush}" />
+  </Style>
+
+  <!-- The Settings button at the end of the menu bar.
+
+       Accented rather than neutral on purpose. It is the one control up there that is not a
+       menu, and it has to be the one a newcomer's eye lands on when they go looking for where
+       the options are kept - which is the whole reason it exists as a button rather than as
+       another entry inside one of the menus. -->
+  <Style Selector="Button.settingsEntry">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="9,3" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style Selector="Button.settingsEntry:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
+    <Setter Property="Opacity" Value="0.85" />
+  </Style>
+
+  <Style Selector="Button.settingsEntry:pressed /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource XpAccentBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource XpAccentForegroundBrush}" />
+    <Setter Property="Opacity" Value="0.7" />
+  </Style>
+
   <Style Selector="Border.dialogSurface">
     <Setter Property="Background" Value="{DynamicResource XpPanelBackgroundBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource XpPanelBorderBrush}" />

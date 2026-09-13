@@ -36,6 +36,7 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
     private bool _isEditingName;
     private bool _isMarked;
     private LayerDropPosition _dropPosition;
+    private bool _isActive;
 
     /// <summary>Initialises the row.</summary>
     /// <param name="layer">The layer to present.</param>
@@ -67,6 +68,58 @@ public sealed partial class LayerItemViewModel : ViewModelBase, IDisposable
     /// ordinary single-layer change, however many rows happen to be highlighted elsewhere.
     /// </remarks>
     internal Func<LayerItemViewModel, IReadOnlyList<LayerNode>>? Peers { get; set; }
+
+    /// <summary>
+    /// The panel commands this row offers in its right-click menu.
+    /// </summary>
+    /// <remarks>
+    /// Handed in by <see cref="LayersViewModel"/> rather than reached for, because a row lives
+    /// inside a menu that is not part of the list box's visual tree - so a binding up to the
+    /// panel cannot find it, and the row has to carry what it needs. They take the row itself
+    /// as their parameter, which is what lets a right-click on an unmarked row act on that row
+    /// alone while a right-click inside the marked set acts on all of it.
+    /// </remarks>
+    public System.Windows.Input.ICommand? DeleteCommand { get; internal set; }
+
+    /// <summary>The command that bakes the marked layers into one; see <see cref="DeleteCommand"/>.</summary>
+    public System.Windows.Input.ICommand? MergeCommand { get; internal set; }
+
+    /// <summary>Switches between one drawing for the whole timeline and one per frame.</summary>
+    public System.Windows.Input.ICommand? ContinuousCommand { get; internal set; }
+
+    /// <summary>Spreads this frame's drawing onto every frame, as separate copies.</summary>
+    public System.Windows.Input.ICommand? CopyToAllFramesCommand { get; internal set; }
+
+    /// <summary>Copies the whole layer, artwork on every frame included.</summary>
+    public System.Windows.Input.ICommand? CopyLayerCommand { get; internal set; }
+
+    /// <summary>Puts a copied layer back into the document.</summary>
+    public System.Windows.Input.ICommand? PasteLayerCommand { get; internal set; }
+
+    /// <summary>
+    /// Whether this layer holds one drawing shared by every frame.
+    /// </summary>
+    /// <remarks>
+    /// Shown as a mark on the row, because a layer that ignores the timeline looks exactly like
+    /// one that does not until you step to another frame and wonder why it followed you.
+    /// </remarks>
+    public bool IsContinuous => Layer.IsContinuous;
+
+    /// <summary>
+    /// Whether this is the layer a stroke is aimed at, as distinct from merely being marked.
+    /// </summary>
+    /// <remarks>
+    /// Three different things can be true of a row and they used to look like two: it can be
+    /// <em>visible</em> (the tick), <em>marked</em> (the highlight, which is what structural
+    /// commands act on) and <em>active</em> (where the tools are pointed). Marking several
+    /// layers to copy them is a different intent from choosing one to paint on, and the panel
+    /// now says which is which.
+    /// </remarks>
+    public bool IsActive
+    {
+        get => _isActive;
+        internal set => SetProperty(ref _isActive, value);
+    }
 
     /// <summary>
     /// Whether this row is part of the marked set, which is what the panel highlights.

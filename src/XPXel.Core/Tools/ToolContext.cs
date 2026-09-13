@@ -22,6 +22,14 @@ namespace XPXel.Core.Tools;
 /// <b>Tools must edit through <see cref="BeginRasterEdit"/>.</b> Writing to a cel's
 /// <c>PixelBuffer</c> directly bypasses both the undo history and the selection, and is the
 /// single easiest way to introduce a bug that only shows up when the artist presses Ctrl+Z.
+/// It is also what routes a stroke to every layer the artist has marked rather than only to
+/// the one being aimed at.
+/// </para>
+/// <para>
+/// <b>There is no colour for the right mouse button.</b> A right press on the canvas opens the
+/// tool's settings panel and never reaches a tool at all, so the secondary colour is reached
+/// with X or from the palette. Tools used to carry a branch for painting with it that could
+/// not run.
 /// </para>
 /// </remarks>
 public sealed class ToolContext
@@ -124,51 +132,69 @@ public sealed class ToolContext
     public bool CanEdit => Workspace.CanEditActiveLayer;
 
     /// <summary>
-    /// Returns the colour a button should apply: primary for the left button, secondary for
-    /// the right.
+    /// Starts recording an undoable edit across every layer the artist has marked, creating
+    /// a cel for the active frame on any of them that is still empty.
     /// </summary>
-    /// <param name="button">The button that was used.</param>
-    /// <returns>The colour to draw with.</returns>
-    public PixelColor GetColorForButton(ToolPointerButton button) =>
-        button == ToolPointerButton.Right ? Colors.Secondary : Colors.Primary;
-
-    /// <summary>
-    /// Starts recording an undoable edit on the active layer's cel for the active frame,
-    /// creating that cel if the layer is still empty.
-    /// </summary>
-    /// <param name="actionName">The name shown in the Edit menu, for example "Pencil".</param>
+    /// <param name="actionName">The name shown in the Edit menu, for example "Pen-xel".</param>
     /// <param name="useSnapshot">
     /// <see langword="true"/> for operations that may touch most of the canvas, such as a
     /// bucket fill. See <see cref="RasterEditSession"/> for the trade-off.
     /// </param>
     /// <returns>
-    /// The session to write through, or <see langword="null"/> if there is no editable
+    /// The scope to write through, or <see langword="null"/> if there is no editable
     /// layer — in which case the tool should simply do nothing.
     /// </returns>
-    public RasterEditSession? BeginRasterEdit(string actionName, bool useSnapshot = false)
+    /// <remarks>
+    /// <para>
+    /// <b>Every marked layer, not just the active one.</b> Marking several rows in the layers
+    /// panel used to change what Delete, Cut, Copy and Ctrl+T did and leave drawing alone, which
+    /// meant the same highlight meant two different things depending on what you did next.
+    /// Drawing now follows the same rule as everything else. The canvas shows a badge beside the
+    /// pointer whenever more than one layer would be written to, because a stroke landing on
+    /// layers the artist has forgotten about is worth saying out loud.
+    /// </para>
+    /// <para>
+    /// <b>The active layer comes first</b>, so <see cref="RasterEditScope.Primary"/> is the
+    /// layer being aimed at — which is the one a flood fill has to read to decide what to fill.
+    /// A locked, hidden or text layer among the marked set is skipped rather than refusing the
+    /// whole stroke: the artist plainly meant the layers that can take paint.
+    /// </para>
+    /// </remarks>
+    public RasterEditScope? BeginRasterEdit(string actionName, bool useSnapshot = false)
     {
-        Cel? cel = Workspace.GetOrCreateActiveCel();
-        if (cel is null)
+        if (Workspace.GetOrCreateActiveCel() is not { } active)
         {
             return null;
         }
 
-        return useSnapshot
-            ? RasterEditSession.BeginWithSnapshot(Document, cel, actionName, Selection)
-            : RasterEditSession.Begin(Document, cel, actionName, Selection);
+        List<Cel> cels = [active];
+
+        foreach (LayerNode leaf in Workspace.GetSelectedLeaves())
+        {
+            if (leaf is not RasterLayer { IsLocked: false } layer
+                || !layer.IsEffectivelyVisible
+                || layer.Id == active.LayerId)
+            {
+                continue;
+            }
+
+            cels.Add(Document.GetOrCreateCel(layer, Workspace.ActiveFrame));
+        }
+
+        return RasterEditScope.Begin(Document, actionName, cels, Selection, useSnapshot);
     }
 
     /// <summary>
-    /// Ends a session and records it in the history, doing nothing if the operation turned
-    /// out to change no pixels.
+    /// Ends an operation and records it in the history, doing nothing if it turned out to
+    /// change no pixels.
     /// </summary>
-    /// <param name="session">The session to finish.</param>
+    /// <param name="scope">The scope to finish.</param>
     /// <returns><see langword="true"/> if a history entry was created.</returns>
-    public bool CommitRasterEdit(RasterEditSession session)
+    public bool CommitRasterEdit(RasterEditScope scope)
     {
-        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(scope);
 
-        IUndoableCommand? command = session.Commit();
+        IUndoableCommand? command = scope.Commit();
         if (command is null)
         {
             return false;

@@ -19,6 +19,7 @@
 -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
              xmlns:vm="using:XPXel.UI.ViewModels"
              x:Class="XPXel.UI.Views.LayersView"
              x:DataType="vm:LayersViewModel"
@@ -26,7 +27,10 @@
 
   <!-- No heading of its own: the panel's dock tab already says "Layers", and repeating it
        inside would spend a row of a narrow panel saying nothing new. -->
-  <Grid RowDefinitions="0,*,Auto,Auto">
+  <!-- The list takes every pixel that is going. The properties below it and the button row
+       under those are as tall as their content and no taller, which is what stops a panel
+       docked at its default height from showing two rows of a six-layer stack. -->
+  <Grid RowDefinitions="0,*,Auto,Auto" MinHeight="200">
 
     <!-- ================================================================================
          The stack
@@ -44,7 +48,7 @@
              SelectionChanged="OnListSelectionChanged"
              Background="Transparent"
              BorderThickness="0"
-             MinHeight="140">
+             MinHeight="96">
 
       <ListBox.Styles>
         <!-- The folder glyph takes its colour from the row, so it flips to the accent
@@ -73,29 +77,42 @@
                     Background="{DynamicResource XpAccentBrush}"
                     IsVisible="{Binding IsDropTargetAbove}" />
 
-            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,*" Height="34" Background="Transparent">
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" Height="34" Background="Transparent">
 
-              <CheckBox Grid.Column="0"
+              <!-- Three different things can be true of a row, and they used to look like
+                   two. The tick is VISIBLE. The row highlight is MARKED, which is what the
+                   structural commands act on. This bar is ACTIVE - where a stroke is aimed -
+                   because marking layers to copy them and choosing one to paint on are
+                   different intentions and the panel has to say which is which. -->
+              <Border Grid.Column="0"
+                      Width="3"
+                      Margin="1,3,3,3"
+                      CornerRadius="2"
+                      Background="{DynamicResource XpAccentBrush}"
+                      IsVisible="{Binding IsActive}"
+                      ToolTip.Tip="The layer tools are pointed at" />
+
+              <CheckBox Grid.Column="1"
                         IsChecked="{Binding IsVisible, Mode=TwoWay}"
                         VerticalAlignment="Center"
                         ToolTip.Tip="Show or hide this layer" />
 
               <!-- Colour label. Always present so rows stay aligned; it is simply
                    transparent when the layer carries no label. -->
-              <Border Grid.Column="1"
+              <Border Grid.Column="2"
                       Width="4"
                       Margin="0,3"
                       CornerRadius="2"
                       Background="{Binding TagBrush}"
                       ToolTip.Tip="Colour label — right-click the row to change it" />
 
-              <Border Grid.Column="2" Width="{Binding Indent}" />
+              <Border Grid.Column="3" Width="{Binding Indent}" />
 
               <!-- Preview of this layer's own content. The checkerboard sits behind it so
                    that transparent areas read as transparent rather than as the panel
                    colour, which would make an empty layer and a filled dark layer look
                    alike in a dark theme. -->
-              <Border Grid.Column="3"
+              <Border Grid.Column="4"
                       Tag="thumbnail"
                       Width="30" Height="30"
                       Margin="4,2"
@@ -108,7 +125,7 @@
                        RenderOptions.BitmapInterpolationMode="None" />
               </Border>
 
-              <Grid Grid.Column="4" ColumnDefinitions="Auto,*" VerticalAlignment="Center" Margin="2,0,0,0">
+              <Grid Grid.Column="5" ColumnDefinitions="Auto,Auto,*" VerticalAlignment="Center" Margin="2,0,0,0">
 
                 <!-- A folder shows a preview too — of everything inside it — so the glyph is
                      what actually tells the two kinds of row apart. -->
@@ -119,10 +136,19 @@
                       IsVisible="{Binding IsGroup}"
                       ToolTip.Tip="Folder — drop a layer on it to put the layer inside" />
 
+                <!-- A layer that ignores the timeline looks exactly like one that does not,
+                     until you step to another frame and wonder why it followed you. -->
+                <Path Grid.Column="1"
+                      Classes="rowIcon"
+                      Data="M2,8 L14,8 M4,5 L4,11 M8,4 L8,12 M12,5 L12,11"
+                      Margin="0,0,5,0"
+                      IsVisible="{Binding IsContinuous}"
+                      ToolTip.Tip="One drawing, shared by every frame" />
+
                 <!-- The name is a label until the row is double-clicked, then a text box.
                      Binding the text box only while editing means the undo entry is written
                      once, when editing ends, rather than on every keystroke. -->
-                <Panel Grid.Column="1" VerticalAlignment="Center">
+                <Panel Grid.Column="2" VerticalAlignment="Center">
                   <TextBlock Text="{Binding Name}"
                              VerticalAlignment="Center"
                              TextTrimming="CharacterEllipsis"
@@ -169,6 +195,46 @@
                   <MenuItem Header="Purple" Command="{Binding SetTagColorCommand}" CommandParameter="#8367C7" />
                   <MenuItem Header="Grey" Command="{Binding SetTagColorCommand}" CommandParameter="#8D99AE" />
                 </MenuItem>
+                <Separator />
+
+                <!-- Everything about this layer across the timeline. "Same on every frame" is
+                     what a background wants; "copy to all frames" is what a starting point
+                     wants, because those stay independent afterwards. -->
+                <MenuItem Header="_Same on Every Frame"
+                          ToggleType="CheckBox"
+                          IsChecked="{Binding IsContinuous, Mode=OneWay}"
+                          Command="{Binding ContinuousCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="One drawing shared by the whole timeline, including frames added later. This is what a background wants" />
+                <MenuItem Header="Copy to All _Frames"
+                          Command="{Binding CopyToAllFramesCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="Put this frame's drawing on every other frame as separate copies, which you can then change one by one" />
+
+                <Separator />
+
+                <MenuItem Header="Cop_y Layer"
+                          Command="{Binding CopyLayerCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="Copy the whole layer — its name, its opacity and every frame's drawing" />
+                <MenuItem Header="_Paste Layer"
+                          Command="{Binding PasteLayerCommand}"
+                          ToolTip.Tip="Put a copied layer into this document, above the selected one" />
+
+                <Separator />
+
+                <!-- Both act on the marked set when the row is part of it, and on this row
+                     alone when it is not - the same rule the buttons below the list follow.
+                     Merge greys itself out below two layers rather than disappearing, so its
+                     absence is never mistaken for the feature not existing. -->
+                <MenuItem Header="_Merge Layers"
+                          Command="{Binding MergeCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="Bake the marked layers into one, on every frame, exactly as they look now" />
+                <MenuItem Header="_Delete"
+                          Command="{Binding DeleteCommand}"
+                          CommandParameter="{Binding}"
+                          ToolTip.Tip="Delete this layer, or every marked layer" />
               </ContextMenu>
             </Grid.ContextMenu>
 
@@ -231,13 +297,17 @@
     <!-- ================================================================================
          Stack operations
          ================================================================================ -->
-    <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="8,4,8,8" Spacing="4">
+    <!-- A WrapPanel rather than a row, because the panel is often docked narrow and a row of
+         seven buttons is wider than that: the last of them would simply be clipped off the
+         edge, which is the same as not being there. Wrapping costs a few pixels of height only
+         when it has to. -->
+    <WrapPanel Grid.Row="3" Orientation="Horizontal" Margin="8,4,8,8">
       <!-- Every button here carries a drawn icon on the same 16-unit grid, rather than a
            mixture of glyphs and paths. Text glyphs come with their own side bearings and
            optical centres, which is why the folder looked low and the duplicate looked shoved
            to the right: they were being centred by different rules. -->
       <Button x:Name="NewLayerButton"
-              Width="30"
+              Width="30" Margin="0,0,4,4"
               Command="{Binding AddLayerCommand}"
               ToolTip.Tip="New layer — or drop a layer here to duplicate it">
         <Path Classes="buttonIcon" Width="17" Height="17" StrokeThickness="1.8"
@@ -247,8 +317,17 @@
       <!-- Named so the code-behind can hit-test a drop against it. Dropping a layer here
            wraps that layer in a new folder in one step, which is the quickest way to start
            organising a stack that has grown past a handful of layers. -->
+      <!-- The one an artist asks for by name. It is opaque white, sits at the bottom, and is
+           the same drawing on every frame - which is the thing that could not be done at all
+           before, since a layer's artwork is otherwise per frame. -->
+      <Button Width="30" Margin="0,0,4,4"
+              Command="{Binding AddBackgroundLayerCommand}"
+              ToolTip.Tip="New background — opaque white, at the bottom, on every frame">
+        <Path Classes="buttonIcon" Data="M2.5,2.5 L13.5,2.5 L13.5,13.5 L2.5,13.5 Z M2.5,10 L6,6.5 L9.5,10 M8,8.5 L10.5,6 L13.5,9" />
+      </Button>
+
       <Button x:Name="NewFolderButton"
-              Width="30"
+              Width="30" Margin="0,0,4,4"
               Command="{Binding AddFolderCommand}"
               ToolTip.Tip="New folder — or drop a layer here to put it in a new folder">
         <!-- Drawn between y=3.5 and y=12.5 so its middle is the middle of the 16-unit box.
@@ -256,12 +335,12 @@
         <Path Classes="buttonIcon" Data="M2,4.5 L6.5,4.5 L8,6.5 L14,6.5 L14,12 L2,12 Z" />
       </Button>
 
-      <Button Width="30" Command="{Binding DuplicateLayerCommand}" ToolTip.Tip="Duplicate layer">
+      <Button Width="30" Margin="0,0,4,4" Command="{Binding DuplicateLayerCommand}" ToolTip.Tip="Duplicate layer">
         <Path Classes="buttonIcon" Data="M5.5,2.5 L13.5,2.5 L13.5,10.5 M2.5,5.5 L10.5,5.5 L10.5,13.5 L2.5,13.5 Z" />
       </Button>
 
       <Button x:Name="DeleteLayerButton"
-              Width="30"
+              Width="30" Margin="0,0,4,4"
               Command="{Binding DeleteLayerCommand}"
               ToolTip.Tip="Delete layer — or drop a layer here to delete that one">
         <!-- A bin rather than a cross. A cross means "close" everywhere else in this
@@ -270,14 +349,60 @@
               Data="M2.5,4.5 L13.5,4.5 M6,4.5 L6,2.5 L10,2.5 L10,4.5 M4,4.5 L4.8,13.5 L11.2,13.5 L12,4.5 M6.6,6.8 L6.8,11.4 M9.4,6.8 L9.2,11.4" />
       </Button>
 
-      <Button Width="30" Command="{Binding MoveLayerUpCommand}" ToolTip.Tip="Move up">
+      <Button Width="30" Margin="0,0,4,4" Command="{Binding MoveLayerUpCommand}" ToolTip.Tip="Move up">
         <Path Classes="buttonIcon" Data="M4,10 L8,5.5 L12,10" />
       </Button>
 
-      <Button Width="30" Command="{Binding MoveLayerDownCommand}" ToolTip.Tip="Move down">
+      <Button Width="30" Margin="0,0,4,4" Command="{Binding MoveLayerDownCommand}" ToolTip.Tip="Move down">
         <Path Classes="buttonIcon" Data="M4,6 L8,10.5 L12,6" />
       </Button>
-    </StackPanel>
+
+      <!-- Layer options, in the panel they are about. They are also in Settings ▸ Layers, and
+           both edit the same object - what happens to a layer when artwork is placed on it is
+           a preference, but it is also something an artist wants to change without leaving the
+           panel they are already looking at. -->
+      <Button Width="30"
+              Margin="6,0,0,4"
+              ToolTip.Tip="Layer options">
+        <Button.Flyout>
+          <Flyout Placement="Top">
+            <StackPanel Spacing="8" MaxWidth="300">
+
+              <TextBlock Text="Layer options" FontWeight="SemiBold" />
+
+              <StackPanel Spacing="2">
+                <CheckBox Content="Transforms make a new layer"
+                          IsChecked="{Binding Settings.TransformToNewLayer, Mode=TwoWay}" />
+                <TextBlock Classes="subtle"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="24,0,0,0"
+                           Text="Only when applying one would cover pixels that are already there, so nothing you have drawn is destroyed by placing something on top of it." />
+              </StackPanel>
+
+              <StackPanel Spacing="2">
+                <CheckBox Content="Pasting from another program makes a new layer"
+                          IsChecked="{Binding Settings.PasteToNewLayer, Mode=TwoWay}" />
+                <TextBlock Classes="subtle"
+                           FontSize="11"
+                           TextWrapping="Wrap"
+                           Margin="24,0,0,0"
+                           Text="An image from a browser or another editor is kept apart. Pixels copied inside XP-xel go onto the layer you are on." />
+              </StackPanel>
+
+              <Button Content="All settings…"
+                      HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Center"
+                      Command="{Binding OpenSettingsCommand}"
+                      CommandParameter="{x:Static dialogs:SettingsSection.Layers}" />
+
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+        <Path Classes="buttonIcon"
+              Data="M8,5.4 A2.6,2.6 0 1,0 8,10.6 A2.6,2.6 0 1,0 8,5.4 M8,1.4 L9.1,1.4 L9.5,3.3 L11,4 L12.6,3 L13.4,3.8 L12.4,5.4 L13.1,6.9 L15,7.3 L15,8.7 L13.1,9.1 L12.4,10.6 L13.4,12.2 L12.6,13 L11,12 L9.5,12.7 L9.1,14.6 L6.9,14.6 L6.5,12.7 L5,12 L3.4,13 L2.6,12.2 L3.6,10.6 L2.9,9.1 L1,8.7 L1,7.3 L2.9,6.9 L3.6,5.4 L2.6,3.8 L3.4,3 L5,4 L6.5,3.3 L6.9,1.4 Z" />
+      </Button>
+    </WrapPanel>
 
   </Grid>
 

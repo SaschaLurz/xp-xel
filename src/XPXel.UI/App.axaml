@@ -94,6 +94,10 @@
       <views:CanvasSizeDialogView />
     </DataTemplate>
 
+    <DataTemplate DataType="dialogs:SettingsDialogViewModel">
+      <views:SettingsDialogView />
+    </DataTemplate>
+
   </Application.DataTemplates>
 
   <Application.Resources>

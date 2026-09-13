@@ -52,6 +52,7 @@ public sealed class AnimationTag : ObservableModel
     private LoopDirection _direction = LoopDirection.Forward;
     private PixelColor? _color;
     private int _repeatCount;
+    private bool _coversWholeTimeline;
 
     /// <summary>Initialises a tag.</summary>
     /// <param name="id">The tag's stable identity, persisted in project files.</param>
@@ -109,6 +110,31 @@ public sealed class AnimationTag : ObservableModel
         }
     }
 
+    /// <summary>
+    /// Whether the animation is the whole timeline, however long the timeline becomes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>On for every animation the editor makes, and the reason is a trap.</b> A range is a
+    /// pair of numbers fixed at the moment it was set, so an artist who names an animation over
+    /// four frames and then draws six more finds that pressing play still shows them the first
+    /// four — with nothing on screen to say why, because the range they set is exactly the range
+    /// they are getting. Following the timeline is what almost everyone means almost all of the
+    /// time, so it is the default, and picking a range by hand is what turning it off is for.
+    /// </para>
+    /// <para>
+    /// <see cref="From"/> and <see cref="To"/> stay true while this is set: the document keeps
+    /// them level with the timeline whenever a frame is added or removed. Everything that reads
+    /// a range — playback, onion skinning, every exporter — therefore needs to know nothing
+    /// about this flag.
+    /// </para>
+    /// </remarks>
+    public bool CoversWholeTimeline
+    {
+        get => _coversWholeTimeline;
+        set => SetProperty(ref _coversWholeTimeline, value);
+    }
+
     /// <summary>How the range loops.</summary>
     public LoopDirection Direction
     {
@@ -159,6 +185,7 @@ public sealed class AnimationTag : ObservableModel
         Direction = Direction,
         RepeatCount = RepeatCount,
         Color = Color,
+        CoversWholeTimeline = CoversWholeTimeline,
     };
 
     /// <inheritdoc />

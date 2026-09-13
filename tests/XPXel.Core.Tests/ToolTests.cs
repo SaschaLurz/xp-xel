@@ -70,7 +70,7 @@ public sealed class ToolTests
     }
 
     [Fact]
-    public void RightButtonDrawsTheSecondaryColour()
+    public void TheRightButtonDrawsNothingAtAll()
     {
         Fixture fixture = new();
         PencilTool pencil = new();
@@ -78,7 +78,10 @@ public sealed class ToolTests
         Press(pencil, fixture, 1, 1, ToolPointerButton.Right);
         Release(pencil, fixture, 1, 1, ToolPointerButton.Right);
 
-        Assert.Equal(Blue, fixture.ActiveCel.Pixels.GetPixel(1, 1));
+        // A right press opens the tool's settings panel and never reaches a tool. The tools
+        // used to carry a branch that painted the secondary colour with it, which the canvas
+        // could not deliver, so the code claimed a feature the application did not have.
+        Assert.True(fixture.ActiveCel.Pixels.GetPixel(1, 1).IsTransparent);
     }
 
     [Fact]

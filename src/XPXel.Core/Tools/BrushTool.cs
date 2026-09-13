@@ -43,6 +43,6 @@ public sealed class BrushTool : StrokeToolBase
     protected override PixelColor ResolveStrokeColor(ToolContext context, ToolPointerButton button)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.GetColorForButton(button);
+        return context.Colors.Primary;
     }
 }

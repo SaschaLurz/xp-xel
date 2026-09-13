@@ -31,12 +31,27 @@ public sealed partial class TimelineCellViewModel : ViewModelBase
     /// <param name="layer">The layer this cell belongs to.</param>
     /// <param name="frameIndex">The frame's position in the timeline.</param>
     /// <param name="select">Makes this cell the one being edited.</param>
-    public TimelineCellViewModel(LayerNode layer, int frameIndex, Action<TimelineCellViewModel> select)
+    /// <param name="owner">The panel, which carries out whatever the cell's menu asks.</param>
+    public TimelineCellViewModel(
+        LayerNode layer,
+        int frameIndex,
+        Action<TimelineCellViewModel> select,
+        TimelineViewModel? owner = null)
     {
         Layer = layer;
         FrameIndex = frameIndex;
         SelectCommand = new RelayCommand(() => select(this));
+        Owner = owner;
     }
+
+    /// <summary>
+    /// The panel this cell belongs to, which its right-click menu binds its commands from.
+    /// </summary>
+    /// <remarks>
+    /// Handed in rather than reached for: a cell's menu is not part of the grid's visual tree,
+    /// so a binding up to the panel cannot find it and the cell has to carry the way back.
+    /// </remarks>
+    public TimelineViewModel? Owner { get; }
 
     /// <summary>The layer this cell belongs to.</summary>
     public LayerNode Layer { get; }
@@ -49,6 +64,9 @@ public sealed partial class TimelineCellViewModel : ViewModelBase
 
     /// <summary>Whether this is the cell the artist is drawing on.</summary>
     public bool IsSelected => IsCurrentFrame && IsCurrentLayer;
+
+    /// <summary>Whether this cell's layer holds one drawing shared by every frame.</summary>
+    public bool IsContinuous => Layer.IsContinuous;
 
     partial void OnIsCurrentFrameChanged(bool value) => OnPropertyChanged(nameof(IsSelected));
 
@@ -138,8 +156,13 @@ public sealed partial class TimelineTagViewModel : ViewModelBase
     /// <summary>The animation's name.</summary>
     public string Name => Tag.Name;
 
-    /// <summary>The range shown beside the name.</summary>
-    public string RangeText => $"{Tag.From + 1}–{Tag.To + 1}";
+    /// <summary>The range shown beside the name, counting frames from one.</summary>
+    /// <remarks>
+    /// An animation that follows the timeline says so rather than showing numbers, because the
+    /// numbers would answer a question the artist did not ask and would change under them
+    /// every time they added a frame.
+    /// </remarks>
+    public string RangeText => Tag.CoversWholeTimeline ? "all frames" : $"{Tag.From + 1}–{Tag.To + 1}";
 
     /// <summary>Makes this the animation being worked on.</summary>
     public IRelayCommand SelectCommand { get; }
@@ -234,37 +257,86 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
     public AnimationTag? ActiveTag => _workspace?.ActiveTag;
 
     /// <summary>
-    /// The index of the last frame, which is as far as an animation's range may reach.
+    /// The number of the last frame, counting from one, which is as far as an animation's
+    /// range may reach.
     /// </summary>
     /// <remarks>
     /// Bound as the maximum of the range editors. A tag is positional and independently
-    /// editable, so without this an artist could name frames 0 to 9 in a five-frame document
+    /// editable, so without this an artist could name frames 1 to 10 in a five-frame document
     /// — and everything that reads a range then has to defend itself against numbers that
     /// mean nothing. Onion skinning did not, and threw.
     /// </remarks>
-    public int LastFrameIndex => Math.Max(0, (_workspace?.Document.Frames.Count ?? 1) - 1);
+    public int LastFrameNumber => Math.Max(1, _workspace?.Document.Frames.Count ?? 1);
 
-    /// <summary>The first frame of the animation being edited.</summary>
+    /// <summary>The first frame of the animation being edited, counting from one.</summary>
     /// <remarks>
+    /// <para>
+    /// <b>Counting from one, because the timeline does.</b> The frame headers are numbered 1,
+    /// 2, 3 and the status bar says "Frame 2 of 6", so a range editor offering 0 to 5 asks the
+    /// artist to translate between two numbering schemes in their head every time they touch
+    /// it. The model stores indices; that is the model's business, and this is where the two
+    /// meet.
+    /// </para>
+    /// <para>
     /// The range editors go through here rather than binding straight at the tag, and that is
-    /// not ceremony. A tag is positional and independently editable, so a range set by hand is
-    /// the one place a document can be given an animation that runs from frame 3 to frame 40
-    /// of five — and everything downstream then has to defend itself against numbers that mean
-    /// nothing. Onion skinning did not, and threw. Going through
-    /// <see cref="SetTagRange(AnimationTag, int, int)"/> both keeps the range inside the
-    /// timeline and puts the change on the undo stack, which a direct binding did neither of.
+    /// not ceremony either. A tag is positional and independently editable, so a range set by
+    /// hand is the one place a document can be given an animation that runs from frame 3 to
+    /// frame 40 of five — and everything downstream then has to defend itself against numbers
+    /// that mean nothing. Going through <see cref="SetTagRange(AnimationTag, int, int)"/> both
+    /// keeps the range inside the timeline and puts the change on the undo stack, which a
+    /// direct binding did neither of.
+    /// </para>
     /// </remarks>
     public int ActiveTagFrom
     {
-        get => ActiveTag?.From ?? 0;
+        get => (ActiveTag?.From ?? 0) + 1;
         set => SetActiveTagRange(value, ActiveTagTo);
     }
 
-    /// <summary>The last frame of the animation being edited, inclusive.</summary>
+    /// <summary>The last frame of the animation being edited, counting from one, inclusive.</summary>
     public int ActiveTagTo
     {
-        get => ActiveTag?.To ?? 0;
+        get => (ActiveTag?.To ?? 0) + 1;
         set => SetActiveTagRange(ActiveTagFrom, value);
+    }
+
+    /// <summary>
+    /// Whether the animation being edited runs the whole timeline, however long it becomes.
+    /// </summary>
+    /// <remarks>
+    /// Turning it off is what unlocks the two range editors, which is the order the decision
+    /// actually happens in: an artist picks a range because they want something narrower than
+    /// everything, not the other way round.
+    /// </remarks>
+    public bool ActiveTagCoversWholeTimeline
+    {
+        get => ActiveTag?.CoversWholeTimeline ?? true;
+        set
+        {
+            if (_workspace is not { } workspace || ActiveTag is not { } tag || tag.CoversWholeTimeline == value)
+            {
+                return;
+            }
+
+            AnimationTag before = tag.CloneWith(tag.Id);
+            AnimationTag after = tag.CloneWith(tag.Id);
+            after.CoversWholeTimeline = value;
+
+            if (value)
+            {
+                after.To = Math.Max(0, workspace.Document.Frames.Count - 1);
+                after.From = 0;
+            }
+
+            ChangeTagCommand command = new("Change Animation", tag, before, after);
+
+            if (command.HasChanges)
+            {
+                workspace.History.Execute(command);
+            }
+
+            RaiseActiveTagChanged();
+        }
     }
 
     /// <summary>Points the panel at a different document, or at none.</summary>
@@ -428,6 +500,138 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
     }
 
     // ---------------------------------------------------------------------------------
+    // Cel commands
+    // ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The drawing last copied out of a cel, waiting to be put on another frame.
+    /// </summary>
+    /// <remarks>
+    /// Its own clipboard rather than the pixel one, because a cel is a whole frame's drawing on
+    /// a layer and the pixel clipboard is what is marked on the canvas. Sharing one would mean
+    /// copying a cel quietly threw away artwork the artist had copied a minute earlier.
+    /// </remarks>
+    private Cel? _celClipboard;
+
+    /// <summary>Copies one cell's drawing.</summary>
+    /// <param name="cell">The cell to copy from.</param>
+    [RelayCommand]
+    private void CopyCel(TimelineCellViewModel? cell)
+    {
+        if (Resolve(cell) is not (var workspace, var layer, var frame))
+        {
+            return;
+        }
+
+        if (workspace.Document.Cels.Find(layer.Id, frame.Id) is { } cel)
+        {
+            _celClipboard = cel.CopyTo(layer.Id, frame.Id);
+        }
+    }
+
+    /// <summary>Copies one cell's drawing and clears it.</summary>
+    /// <param name="cell">The cell to cut.</param>
+    [RelayCommand]
+    private void CutCel(TimelineCellViewModel? cell)
+    {
+        CopyCel(cell);
+        ClearCel(cell);
+    }
+
+    /// <summary>Puts the copied drawing onto a cell.</summary>
+    /// <param name="cell">The cell to paste into.</param>
+    [RelayCommand]
+    private void PasteCel(TimelineCellViewModel? cell)
+    {
+        if (_celClipboard is not { } content || Resolve(cell) is not (var workspace, var layer, var frame))
+        {
+            return;
+        }
+
+        SetCelCommand command = new("Paste Cel", workspace.Document, layer, frame, content);
+
+        if (command.HasChanges)
+        {
+            workspace.History.Execute(command);
+        }
+    }
+
+    /// <summary>Clears one cell, leaving the layer empty on that frame.</summary>
+    /// <param name="cell">The cell to clear.</param>
+    [RelayCommand]
+    private void ClearCel(TimelineCellViewModel? cell)
+    {
+        if (Resolve(cell) is not (var workspace, var layer, var frame))
+        {
+            return;
+        }
+
+        ClearCelCommand command = new("Clear Cel", workspace.Document, layer, frame);
+
+        if (command.HasChanges)
+        {
+            workspace.History.Execute(command);
+        }
+    }
+
+    /// <summary>Copies one cell's drawing onto every frame of its layer.</summary>
+    /// <param name="cell">The cell to spread.</param>
+    [RelayCommand]
+    private void CopyCelToAllFrames(TimelineCellViewModel? cell)
+    {
+        if (Resolve(cell) is not (var workspace, var layer, var frame))
+        {
+            return;
+        }
+
+        CopyCelToAllFramesCommand command = new("Copy to All Frames", workspace.Document, layer, frame);
+
+        if (command.HasChanges)
+        {
+            workspace.History.Execute(command);
+        }
+    }
+
+    /// <summary>Switches a cell's layer between one drawing for the timeline and one per frame.</summary>
+    /// <param name="cell">A cell of the layer to change.</param>
+    [RelayCommand]
+    private void ToggleCelContinuous(TimelineCellViewModel? cell)
+    {
+        if (Resolve(cell) is not (var workspace, var layer, var frame))
+        {
+            return;
+        }
+
+        SetLayerContinuousCommand command = new(
+            layer.IsContinuous ? "One Drawing per Frame" : "Same on Every Frame",
+            workspace.Document,
+            layer,
+            !layer.IsContinuous,
+            frame);
+
+        if (command.HasChanges)
+        {
+            workspace.History.Execute(command);
+        }
+    }
+
+    /// <summary>Finds the document, layer and frame a cell stands for.</summary>
+    private (DocumentWorkspace Workspace, LayerNode Layer, Frame Frame)? Resolve(TimelineCellViewModel? cell)
+    {
+        if (cell is null || _workspace is not { } workspace)
+        {
+            return null;
+        }
+
+        if (cell.FrameIndex < 0 || cell.FrameIndex >= workspace.Document.Frames.Count)
+        {
+            return null;
+        }
+
+        return (workspace, cell.Layer, workspace.Document.Frames[cell.FrameIndex]);
+    }
+
+    // ---------------------------------------------------------------------------------
     // Tag commands
     // ---------------------------------------------------------------------------------
 
@@ -448,7 +652,13 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
 
         int to = workspace.Document.Frames.Count - 1;
 
-        AnimationTag tag = new(Guid.NewGuid(), $"Animation {workspace.Document.Tags.Count + 1}", 0, to);
+        AnimationTag tag = new(Guid.NewGuid(), $"Animation {workspace.Document.Tags.Count + 1}", 0, to)
+        {
+            // Every frame, and every frame added later: see AnimationTag.CoversWholeTimeline
+            // for why a range fixed at this moment is the wrong default.
+            CoversWholeTimeline = true,
+        };
+
         workspace.History.Execute(new AddTagCommand("Add Animation", workspace.Document, tag));
         workspace.ActiveTag = tag;
     }
@@ -507,17 +717,27 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
     /// pushed back into the editor it was typed into. Without that, a field left showing 40
     /// would disagree with the tag it is bound to.
     /// </remarks>
-    private void SetActiveTagRange(int from, int to)
+    private void SetActiveTagRange(int fromNumber, int toNumber)
     {
         if (ActiveTag is not { } tag)
         {
             return;
         }
 
-        SetTagRange(tag, from, to);
+        // Frame numbers in, frame indices out: this is the only place the two meet.
+        SetTagRange(tag, fromNumber - 1, toNumber - 1);
 
         OnPropertyChanged(nameof(ActiveTagFrom));
         OnPropertyChanged(nameof(ActiveTagTo));
+    }
+
+    /// <summary>Tells the panel that everything about the current animation may have moved.</summary>
+    private void RaiseActiveTagChanged()
+    {
+        OnPropertyChanged(nameof(ActiveTag));
+        OnPropertyChanged(nameof(ActiveTagFrom));
+        OnPropertyChanged(nameof(ActiveTagTo));
+        OnPropertyChanged(nameof(ActiveTagCoversWholeTimeline));
     }
 
     /// <summary>Records a change made directly to an animation, so it can be undone.</summary>
@@ -582,7 +802,7 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
 
                 for (int i = 0; i < document.Frames.Count; i++)
                 {
-                    TimelineCellViewModel cell = new(layer, i, SelectCell)
+                    TimelineCellViewModel cell = new(layer, i, SelectCell, this)
                     {
                         HasContent = document.Cels.Find(layer.Id, document.Frames[i].Id) is not null,
                     };
@@ -608,10 +828,8 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
 
         OnPropertyChanged(nameof(HasDocument));
         OnPropertyChanged(nameof(PositionText));
-        OnPropertyChanged(nameof(LastFrameIndex));
-        OnPropertyChanged(nameof(ActiveTag));
-        OnPropertyChanged(nameof(ActiveTagFrom));
-        OnPropertyChanged(nameof(ActiveTagTo));
+        OnPropertyChanged(nameof(LastFrameNumber));
+        RaiseActiveTagChanged();
     }
 
     private void RefreshSelection()
@@ -648,7 +866,7 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
         }
 
         OnPropertyChanged(nameof(PositionText));
-        OnPropertyChanged(nameof(LastFrameIndex));
+        OnPropertyChanged(nameof(LastFrameNumber));
     }
 
     private void SelectCell(TimelineCellViewModel cell)
@@ -754,9 +972,7 @@ public sealed partial class TimelineViewModel : ViewModelBase, IDisposable
 
             case nameof(DocumentWorkspace.ActiveTag):
                 RefreshSelection();
-                OnPropertyChanged(nameof(ActiveTag));
-                OnPropertyChanged(nameof(ActiveTagFrom));
-                OnPropertyChanged(nameof(ActiveTagTo));
+                RaiseActiveTagChanged();
                 break;
 
             default:

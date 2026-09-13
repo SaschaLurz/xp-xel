@@ -98,7 +98,7 @@ public sealed class SelectionTransformTests
     }
 
     [Fact]
-    public void TheMarqueeFollowsThePixelsAndComesBackWithThem()
+    public void PlacingThePixelsClearsTheMarksAndUndoBringsThemBack()
     {
         Fixture fixture = new();
         fixture.Fill(new ImageRect(1, 1, 2, 2), Red);
@@ -108,10 +108,29 @@ public sealed class SelectionTransformTests
         fixture.Workspace.ActiveTransform!.MoveBy(3, 2);
         fixture.Workspace.CommitTransform();
 
-        Assert.Equal(new ImageRect(4, 3, 2, 2), fixture.Workspace.Selection!.Bounds);
+        // Enter means done, here as everywhere else on the canvas: the pixels are placed and
+        // the outline that was asking about them goes with them.
+        Assert.Null(fixture.Workspace.Selection);
 
         fixture.Workspace.History.Undo();
         Assert.Equal(new ImageRect(1, 1, 2, 2), fixture.Workspace.Selection!.Bounds);
+    }
+
+    [Fact]
+    public void AMoveThatWentNowhereLeavesTheMarksAlone()
+    {
+        Fixture fixture = new();
+        fixture.Fill(new ImageRect(1, 1, 2, 2), Red);
+        fixture.Select(new ImageRect(1, 1, 2, 2));
+
+        fixture.Workspace.BeginTransform();
+        fixture.Workspace.CommitTransform();
+
+        // Pressing on the marching ants and letting go without dragging has answered nothing,
+        // and this path is also reached defensively when the tool or the tab changes - so
+        // throwing the marks away here would lose them to a gesture nobody made.
+        Assert.NotNull(fixture.Workspace.Selection);
+        Assert.Equal(0, fixture.Workspace.History.Count);
     }
 
     [Fact]
@@ -132,7 +151,7 @@ public sealed class SelectionTransformTests
     }
 
     [Fact]
-    public void PixelsPushedOffTheCanvasAreDropped()
+    public void PixelsPushedOffTheCanvasAreKept()
     {
         Fixture fixture = new();
         fixture.Fill(new ImageRect(0, 0, 2, 2), Red);
@@ -142,10 +161,17 @@ public sealed class SelectionTransformTests
         fixture.Workspace.ActiveTransform!.MoveBy(7, 0);
         fixture.Workspace.CommitTransform();
 
-        // The right-hand column of the selection lands outside an eight-wide document, so it
-        // goes; the marquee has to agree with that rather than claim pixels that do not exist.
-        Assert.Equal(Red, fixture.Pixels.GetPixel(7, 0));
-        Assert.Equal(new ImageRect(7, 0, 1, 2), fixture.Workspace.Selection!.Bounds);
+        // The right-hand column lands outside an eight-wide document. It is kept in the layer,
+        // hidden rather than cut, exactly as it would be if the whole layer had been dragged
+        // off the side: only the eraser and the delete commands destroy pixels.
+        Assert.Equal(Red, fixture.CelPixel(7, 0));
+        Assert.Equal(Red, fixture.CelPixel(8, 0));
+        Assert.Equal(Red, fixture.CelPixel(8, 1));
+
+        // And undoing puts the layer back exactly as it was, grown buffer and all.
+        fixture.Workspace.History.Undo();
+        Assert.Equal(Red, fixture.CelPixel(0, 0));
+        Assert.True(fixture.CelPixel(7, 0).IsTransparent);
     }
 
     [Fact]
@@ -182,12 +208,14 @@ public sealed class SelectionTransformTests
             PixelDocument document = PixelDocument.CreateNew(new ImageSize(8, 8));
             Workspace = new DocumentWorkspace(document);
 
-            RasterLayer layer = (RasterLayer)document.Root.Children[0];
-            Cel cel = document.GetOrCreateCel(layer, document.Frames[0]);
+            Layer = (RasterLayer)document.Root.Children[0];
+            Cel cel = document.GetOrCreateCel(Layer, document.Frames[0]);
             Pixels = cel.Pixels;
         }
 
         public DocumentWorkspace Workspace { get; }
+
+        public RasterLayer Layer { get; }
 
         public PixelBuffer Pixels { get; }
 
@@ -200,6 +228,20 @@ public sealed class SelectionTransformTests
                     Pixels.SetPixel(x, y, color);
                 }
             }
+        }
+
+        /// <summary>
+        /// Reads a pixel of the layer's own content, in document coordinates, including the
+        /// part of it that has been pushed off the canvas.
+        /// </summary>
+        /// <remarks>
+        /// Looked up rather than cached, because a cel is replaced rather than resized when it
+        /// has to grow to hold artwork that went over the edge.
+        /// </remarks>
+        public PixelColor CelPixel(int x, int y)
+        {
+            Cel cel = Workspace.Document.Cels.Find(Layer.Id, Workspace.Document.Frames[0].Id)!;
+            return cel.Pixels.GetPixelOrTransparent(x - cel.Offset.X, y - cel.Offset.Y);
         }
 
         public void Select(ImageRect region) =>

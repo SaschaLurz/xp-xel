@@ -112,11 +112,32 @@ public sealed class PixelDocument : ObservableModel
     /// </summary>
     /// <param name="size">The canvas dimensions.</param>
     /// <param name="layerName">The name for the initial layer.</param>
+    /// <param name="animationName">
+    /// The name for an animation covering the whole timeline, or <see langword="null"/> for a
+    /// document that starts with none.
+    /// </param>
     /// <returns>The new document.</returns>
-    public static PixelDocument CreateNew(ImageSize size, string layerName = "Layer 1")
+    /// <remarks>
+    /// The editor asks for the animation; nothing else does. A document assembled by an
+    /// importer or a test has whatever animations its source had, and inventing one for it
+    /// would put a name into an exported sprite sheet that nobody chose.
+    /// </remarks>
+    public static PixelDocument CreateNew(
+        ImageSize size,
+        string layerName = "Layer 1",
+        string? animationName = null)
     {
         PixelDocument document = new(size);
         document.CreateRasterLayer(layerName);
+
+        if (!string.IsNullOrWhiteSpace(animationName))
+        {
+            document.InsertTag(new AnimationTag(Guid.NewGuid(), animationName, 0, document.Frames.Count - 1)
+            {
+                CoversWholeTimeline = true,
+            });
+        }
+
         return document;
     }
 
@@ -296,6 +317,72 @@ public sealed class PixelDocument : ObservableModel
 
         InsertLayer(copy, parent, parent.IndexOf(source) + 1);
         return copy;
+    }
+
+    /// <summary>
+    /// Makes a layer's content one drawing shared by every frame, or gives every frame its
+    /// own copy again.
+    /// </summary>
+    /// <param name="layer">The layer to change.</param>
+    /// <param name="continuous">Whether it should hold one drawing for the whole timeline.</param>
+    /// <param name="keepFrom">
+    /// Whose drawing survives when several frames are collapsed into one, or
+    /// <see langword="null"/> for the first frame that has any content.
+    /// </param>
+    /// <returns>
+    /// The cels that were displaced, which a caller must retain for the change to be
+    /// undoable. Turning the switch on discards every frame's drawing but one.
+    /// </returns>
+    /// <remarks>
+    /// The flag and the cel store are changed together and only here, because a layer marked
+    /// continuous whose artwork is still filed per frame would show nothing at all — see
+    /// <see cref="LayerNode.IsContinuous"/>.
+    /// </remarks>
+    public IReadOnlyList<Cel> SetLayerContinuous(LayerNode layer, bool continuous, Frame? keepFrom = null)
+    {
+        ArgumentNullException.ThrowIfNull(layer);
+
+        if (layer.IsContinuous == continuous)
+        {
+            return [];
+        }
+
+        // Captured before the store is touched, so an undo can put back exactly what was
+        // displaced rather than a reconstruction of it.
+        List<Cel> displaced = [];
+
+        foreach (Frame frame in _frames)
+        {
+            if (Cels.Find(layer.Id, frame.Id) is { } cel && !displaced.Contains(cel))
+            {
+                displaced.Add(cel);
+            }
+        }
+
+        Cels.SetContinuous(layer.Id, continuous, _frames, keepFrom?.Id);
+        layer.IsContinuous = continuous;
+
+        NotifyStructureChanged();
+        return displaced;
+    }
+
+    /// <summary>
+    /// Puts a layer's cels back exactly as they were filed, undoing
+    /// <see cref="SetLayerContinuous"/>.
+    /// </summary>
+    /// <param name="layer">The layer to restore.</param>
+    /// <param name="continuous">The flag it had.</param>
+    /// <param name="cels">The cels it had, keyed as they were.</param>
+    public void RestoreLayerContinuity(LayerNode layer, bool continuous, IEnumerable<Cel> cels)
+    {
+        ArgumentNullException.ThrowIfNull(layer);
+        ArgumentNullException.ThrowIfNull(cels);
+
+        Cels.RemoveAllForLayer(layer.Id);
+        Cels.RestoreRange(cels);
+
+        layer.IsContinuous = continuous;
+        NotifyStructureChanged();
     }
 
     /// <summary>
@@ -664,6 +751,7 @@ public sealed class PixelDocument : ObservableModel
 
         _tags.Insert(index < 0 ? _tags.Count : Math.Clamp(index, 0, _tags.Count), tag);
         tag.PropertyChanged += OnContentPropertyChanged;
+        SyncWholeTimelineTags();
         NotifyStructureChanged();
     }
 
@@ -706,6 +794,7 @@ public sealed class PixelDocument : ObservableModel
             _tags.Add(tag);
         }
 
+        SyncWholeTimelineTags();
         NotifyStructureChanged();
     }
 
@@ -721,6 +810,13 @@ public sealed class PixelDocument : ObservableModel
     {
         foreach (AnimationTag tag in _tags)
         {
+            if (tag.CoversWholeTimeline)
+            {
+                // Its range is not a decision anyone made, so there is nothing to preserve:
+                // SyncWholeTimelineTags puts it over the new timeline once the frame is in.
+                continue;
+            }
+
             if (index <= tag.From)
             {
                 tag.To++;
@@ -730,6 +826,34 @@ public sealed class PixelDocument : ObservableModel
             {
                 tag.To++;
             }
+        }
+
+        SyncWholeTimelineTags();
+    }
+
+    /// <summary>
+    /// Puts every animation that follows the timeline back over the whole of it.
+    /// </summary>
+    /// <remarks>
+    /// Called after any change to the frame list, so that <see cref="AnimationTag.From"/> and
+    /// <see cref="AnimationTag.To"/> are always true. Everything downstream — playback, onion
+    /// skinning, every exporter — then reads a plain pair of indices and needs to know nothing
+    /// about <see cref="AnimationTag.CoversWholeTimeline"/> at all.
+    /// </remarks>
+    private void SyncWholeTimelineTags()
+    {
+        int last = Math.Max(0, _frames.Count - 1);
+
+        foreach (AnimationTag tag in _tags)
+        {
+            if (!tag.CoversWholeTimeline)
+            {
+                continue;
+            }
+
+            // To first: setting From past the current To would drag To along with it.
+            tag.To = last;
+            tag.From = 0;
         }
     }
 
@@ -742,6 +866,14 @@ public sealed class PixelDocument : ObservableModel
         for (int i = _tags.Count - 1; i >= 0; i--)
         {
             AnimationTag tag = _tags[i];
+
+            if (tag.CoversWholeTimeline)
+            {
+                // Never dropped, however few frames are left: an animation that means "all of
+                // it" still means that over one frame, and deleting it would leave the artist
+                // to make it again.
+                continue;
+            }
 
             if (index < tag.From)
             {
@@ -762,8 +894,9 @@ public sealed class PixelDocument : ObservableModel
                 tag.To--;
             }
         }
-    }
 
+        SyncWholeTimelineTags();
+    }
 
     private void AttachLayer(LayerNode layer)
     {
@@ -791,6 +924,16 @@ public sealed class PixelDocument : ObservableModel
         }
     }
 
-    private void OnContentPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+    private void OnContentPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // An animation switched to following the timeline takes the whole of it at once,
+        // rather than keeping whatever range it had until the next frame is added. Re-entry
+        // is not a worry: the range setters raise nothing when the value is already right.
+        if (e?.PropertyName == nameof(AnimationTag.CoversWholeTimeline))
+        {
+            SyncWholeTimelineTags();
+        }
+
         NotifyPropertiesChanged();
+    }
 }

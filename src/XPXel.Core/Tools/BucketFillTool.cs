@@ -46,7 +46,7 @@ public sealed class BucketFillTool : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (e.Button is not (ToolPointerButton.Left or ToolPointerButton.Right))
+        if (e.Button != ToolPointerButton.Left)
         {
             return;
         }
@@ -56,18 +56,23 @@ public sealed class BucketFillTool : ITool
             return;
         }
 
-        RasterEditSession? session = context.BeginRasterEdit(DisplayName, useSnapshot: true);
-        if (session is null)
+        RasterEditScope? scope = context.BeginRasterEdit(DisplayName, useSnapshot: true);
+        if (scope is null)
         {
             return;
         }
 
-        PixelColor color = context.GetColorForButton(e.Button);
+        PixelColor color = context.Colors.Primary;
 
         // The fill walks the cel's own buffer, which sits at an offset once its layer has been
         // moved; everything the artist and the selection speak of is in document coordinates,
         // so each pixel is converted on the way out.
-        ImagePoint origin = session.Origin;
+        //
+        // The buffer is the layer being aimed at, even when several are marked. Flooding each
+        // layer from its own colours would fill an empty one from edge to edge, which is never
+        // what anybody meant; the shape the artist can see and clicked into is the honest
+        // answer, and it is then painted onto all of them.
+        ImagePoint origin = scope.Origin;
 
         // The selection gates traversal as well as writing, so a selection edge stops the
         // fill from leaking rather than merely preventing the write.
@@ -76,14 +81,14 @@ public sealed class BucketFillTool : ITool
             : (x, y) => selection.IsSelected(x + origin.X, y + origin.Y);
 
         FloodFill.Fill(
-            session.Pixels,
+            scope.Pixels,
             new ImagePoint(e.Position.X - origin.X, e.Position.Y - origin.Y),
             context.Settings.FillTolerance,
             context.Settings.IsFillContiguous,
             canVisit,
-            (x, y) => session.SetPixel(x + origin.X, y + origin.Y, color));
+            (x, y) => scope.SetPixel(x + origin.X, y + origin.Y, color));
 
-        context.CommitRasterEdit(session);
+        context.CommitRasterEdit(scope);
     }
 
     /// <inheritdoc />

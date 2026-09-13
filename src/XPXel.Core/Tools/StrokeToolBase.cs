@@ -71,7 +71,7 @@ public abstract class StrokeToolBase : ITool
     /// </summary>
     private readonly Dictionary<long, double> _coverage = [];
 
-    private RasterEditSession? _session;
+    private RasterEditScope? _scope;
     private ImagePoint _lastPoint;
     private PixelColor _color;
     private int _brushSize = 1;
@@ -95,7 +95,7 @@ public abstract class StrokeToolBase : ITool
     /// Gets a value indicating whether a stroke is currently in progress. Useful to
     /// subclasses that need to vary behaviour mid-stroke.
     /// </summary>
-    protected bool IsStrokeInProgress => _session is not null;
+    protected bool IsStrokeInProgress => _scope is not null;
 
     /// <summary>
     /// Gets a value indicating whether this tool honours the brush softness and stroke
@@ -138,7 +138,9 @@ public abstract class StrokeToolBase : ITool
     /// <param name="coverage">How much of the pixel the brush covers, above 0 and up to 1.</param>
     /// <remarks>
     /// Compositing is against <see cref="RasterEditSession.GetOriginalPixel"/> rather than
-    /// the pixel's current value; see the type remarks for why that matters.
+    /// the pixel's current value; see the type remarks for why that matters. It is handed one
+    /// layer's session at a time, and called once per marked layer, so that each layer
+    /// composites against its own pre-stroke pixels rather than against somebody else's.
     /// </remarks>
     protected virtual void ApplyStrokePixel(
         RasterEditSession session,
@@ -165,7 +167,7 @@ public abstract class StrokeToolBase : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (e.Button is not (ToolPointerButton.Left or ToolPointerButton.Right))
+        if (e.Button != ToolPointerButton.Left)
         {
             return;
         }
@@ -174,15 +176,15 @@ public abstract class StrokeToolBase : ITool
         // can leave one open, and silently leaking a session would leak its undo data too.
         Cancel(context);
 
-        RasterEditSession? session = context.BeginRasterEdit(DisplayName);
-        if (session is null)
+        RasterEditScope? scope = context.BeginRasterEdit(DisplayName);
+        if (scope is null)
         {
             return;
         }
 
         bool dynamics = SupportsBrushDynamics;
 
-        _session = session;
+        _scope = scope;
         _color = ResolveStrokeColor(context, e.Button);
         _brushSize = context.Settings.BrushSize;
         _brushShape = ResolveBrushShape(context);
@@ -193,7 +195,7 @@ public abstract class StrokeToolBase : ITool
         _lastPoint = e.Position;
 
         StampAt(e.Position.X, e.Position.Y);
-        session.PublishInterimChanges();
+        scope.PublishInterimChanges();
     }
 
     /// <inheritdoc />
@@ -201,7 +203,7 @@ public abstract class StrokeToolBase : ITool
     {
         ArgumentNullException.ThrowIfNull(e);
 
-        if (_session is null || _stampBrush is null)
+        if (_scope is null || _stampBrush is null)
         {
             return;
         }
@@ -217,7 +219,7 @@ public abstract class StrokeToolBase : ITool
         // stroke continuous instead of dotted.
         LineRasterizer.PlotLine(_lastPoint, target, _stampBrush);
         _lastPoint = target;
-        _session.PublishInterimChanges();
+        _scope.PublishInterimChanges();
     }
 
     /// <inheritdoc />
@@ -226,19 +228,19 @@ public abstract class StrokeToolBase : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (_session is not { } session)
+        if (_scope is not { } scope)
         {
             return;
         }
 
-        context.CommitRasterEdit(session);
+        context.CommitRasterEdit(scope);
         Reset();
     }
 
     /// <inheritdoc />
     public void Cancel(ToolContext context)
     {
-        _session?.Rollback();
+        _scope?.Rollback();
         Reset();
     }
 
@@ -293,20 +295,20 @@ public abstract class StrokeToolBase : ITool
     /// </summary>
     private void StampAt(int x, int y)
     {
-        if (_session is not { } session)
+        if (_scope is not { } scope)
         {
             return;
         }
 
         if (_softness <= 0.0)
         {
-            // The hard path skips the coverage bookkeeping entirely, which is what a pencil
+            // The hard path skips the coverage bookkeeping entirely, which is what a pen-xel
             // takes for every pixel of every stroke.
             BrushStamp.Stamp(
                 new ImagePoint(x, y),
                 _brushSize,
                 _brushShape,
-                (px, py) => ApplyStrokePixel(session, px, py, _color, 1.0));
+                (px, py) => ApplyToEveryLayer(scope, px, py, 1.0));
 
             return;
         }
@@ -316,7 +318,7 @@ public abstract class StrokeToolBase : ITool
 
     private void ApplyCoverage(int x, int y, double coverage)
     {
-        if (_session is not { } session)
+        if (_scope is not { } scope)
         {
             return;
         }
@@ -331,12 +333,29 @@ public abstract class StrokeToolBase : ITool
         }
 
         _coverage[key] = coverage;
-        ApplyStrokePixel(session, x, y, _color, coverage);
+        ApplyToEveryLayer(scope, x, y, coverage);
+    }
+
+    /// <summary>
+    /// Puts one pixel of the stroke onto every layer the scope reaches.
+    /// </summary>
+    /// <remarks>
+    /// One session at a time, rather than one fanned-out write, because a soft brush and the
+    /// eraser both composite against the pixel's <em>pre-stroke</em> value — and that value is
+    /// different on every layer. Handing each session to <see cref="ApplyStrokePixel"/> in turn
+    /// is what keeps a feathered edge correct on all of them at once.
+    /// </remarks>
+    private void ApplyToEveryLayer(RasterEditScope scope, int x, int y, double coverage)
+    {
+        foreach (RasterEditSession session in scope.Sessions)
+        {
+            ApplyStrokePixel(session, x, y, _color, coverage);
+        }
     }
 
     private void Reset()
     {
-        _session = null;
+        _scope = null;
         _stampBrush = null;
         _applyCoverage = null;
         _coverage.Clear();

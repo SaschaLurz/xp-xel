@@ -116,6 +116,67 @@ public sealed class AnimationTests
     // ---------------------------------------------------------------------------------
 
     [Fact]
+    public void ANewDocumentCanStartWithAnAnimationAlreadyInIt()
+    {
+        PixelDocument document = PixelDocument.CreateNew(new ImageSize(4, 4), animationName: "Animation");
+
+        AnimationTag tag = Assert.Single(document.Tags);
+        Assert.Equal("Animation", tag.Name);
+        Assert.True(tag.CoversWholeTimeline);
+
+        // A document built by an importer or a test asks for none, and gets none: inventing
+        // one would put a name nobody chose into an exported sprite sheet.
+        Assert.Empty(PixelDocument.CreateNew(new ImageSize(4, 4)).Tags);
+    }
+
+    [Fact]
+    public void AnAnimationThatFollowsTheTimelineGrowsWithIt()
+    {
+        PixelDocument document = CreateDocument(3);
+        AnimationTag all = new(Guid.NewGuid(), "all", 0, 2) { CoversWholeTimeline = true };
+        document.InsertTag(all);
+
+        document.CreateFrame();
+        document.CreateFrame();
+
+        // The frames added after the animation was named play too, which is the whole point:
+        // a range fixed when it was set is how an artist ends up watching the first three of
+        // five frames with nothing on screen to say why.
+        Assert.Equal(0, all.From);
+        Assert.Equal(4, all.To);
+    }
+
+    [Fact]
+    public void AnAnimationThatFollowsTheTimelineShrinksWithItAndIsNeverDropped()
+    {
+        PixelDocument document = CreateDocument(3);
+        AnimationTag all = new(Guid.NewGuid(), "all", 0, 2) { CoversWholeTimeline = true };
+        document.InsertTag(all);
+
+        document.RemoveFrame(document.Frames[2]);
+        document.RemoveFrame(document.Frames[1]);
+
+        Assert.Same(all, Assert.Single(document.Tags));
+        Assert.Equal(0, all.From);
+        Assert.Equal(0, all.To);
+    }
+
+    [Fact]
+    public void AnAnimationWithARangeOfItsOwnIsLeftAlone()
+    {
+        PixelDocument document = CreateDocument(6);
+        AnimationTag walk = document.CreateTag("walk", 2, 4);
+
+        document.CreateFrame();
+
+        // Turning the option off is how an artist says "these frames and no others", so a
+        // frame appended afterwards must not quietly join the animation.
+        Assert.False(walk.CoversWholeTimeline);
+        Assert.Equal(2, walk.From);
+        Assert.Equal(4, walk.To);
+    }
+
+    [Fact]
     public void InsertingAFrameInsideATagExtendsIt()
     {
         PixelDocument document = CreateDocument(6);

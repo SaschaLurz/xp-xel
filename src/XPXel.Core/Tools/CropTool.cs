@@ -74,10 +74,11 @@ public sealed class CropTool : ITool, IInteractiveTool
     /// How near an edge the pointer counts as grabbing it, in screen pixels.
     /// </summary>
     /// <remarks>
-    /// Matched to the size the canvas draws its handles, so that everything that looks grabbable
-    /// is grabbable and nothing else is.
+    /// Shared with the free transform box, so the two frames the canvas can put on screen are
+    /// grabbed in exactly the same way. They used to differ, which meant a habit built on one
+    /// of them missed on the other.
     /// </remarks>
-    public const double GripScreenDistance = 7.0;
+    public const double GripScreenDistance = Editing.FreeTransform.GripScreenDistance;
 
     private ImageRect _frame;
     private ImageRect _dragStart;
@@ -272,38 +273,62 @@ public sealed class CropTool : ITool, IInteractiveTool
         Math.Max(1, (int)Math.Round(GripScreenDistance / Math.Max(context.ViewScale, 0.01)));
 
     /// <summary>Works out what a press at a point is asking to drag.</summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule the free transform box follows, so that the two frames XP-xel can put on
+    /// the canvas behave identically. <b>The handles are the eight squares that are drawn and
+    /// nowhere else</b>, which is what makes the pointer shape an honest promise; anywhere else
+    /// inside the frame moves the whole thing, and there is a handle in the middle for doing
+    /// that deliberately.
+    /// </para>
+    /// <para>
+    /// The middle is tested first and its reach is held to a quarter of the frame, so a small
+    /// crop frame is never all edge with no way left to slide it.
+    /// </para>
+    /// </remarks>
     private CropGrip GetGrip(ImagePoint point, int tolerance)
     {
-        bool nearLeft = Math.Abs(point.X - _frame.Left) <= tolerance;
-        bool nearRight = Math.Abs(point.X - _frame.Right) <= tolerance;
-        bool nearTop = Math.Abs(point.Y - _frame.Top) <= tolerance;
-        bool nearBottom = Math.Abs(point.Y - _frame.Bottom) <= tolerance;
+        tolerance = Math.Max(1, tolerance);
 
-        bool withinRows = point.Y >= _frame.Top - tolerance && point.Y <= _frame.Bottom + tolerance;
-        bool withinColumns = point.X >= _frame.Left - tolerance && point.X <= _frame.Right + tolerance;
+        int centreX = _frame.Left + (_frame.Width / 2);
+        int centreY = _frame.Top + (_frame.Height / 2);
+        int reach = Math.Clamp(tolerance, 1, Math.Max(1, Math.Min(_frame.Width, _frame.Height) / 4));
 
-        CropGrip grip = CropGrip.None;
-
-        if (nearLeft && withinRows)
+        if (Math.Abs(point.X - centreX) <= reach && Math.Abs(point.Y - centreY) <= reach)
         {
-            grip |= CropGrip.Left;
-        }
-        else if (nearRight && withinRows)
-        {
-            grip |= CropGrip.Right;
+            return CropGrip.All;
         }
 
-        if (nearTop && withinColumns)
+        bool onLeft = Math.Abs(point.X - _frame.Left) <= tolerance;
+        bool onRight = Math.Abs(point.X - _frame.Right) <= tolerance;
+        bool onMiddleColumn = Math.Abs(point.X - centreX) <= tolerance;
+
+        bool onTop = Math.Abs(point.Y - _frame.Top) <= tolerance;
+        bool onBottom = Math.Abs(point.Y - _frame.Bottom) <= tolerance;
+        bool onMiddleRow = Math.Abs(point.Y - centreY) <= tolerance;
+
+        CropGrip horizontal = onLeft ? CropGrip.Left : onRight ? CropGrip.Right : CropGrip.None;
+        CropGrip vertical = onTop ? CropGrip.Top : onBottom ? CropGrip.Bottom : CropGrip.None;
+
+        // A corner handle is both edges at once; an edge handle is one edge and the middle of
+        // the other axis, which is exactly where the four edge squares are drawn.
+        if (horizontal != CropGrip.None && vertical != CropGrip.None)
         {
-            grip |= CropGrip.Top;
-        }
-        else if (nearBottom && withinColumns)
-        {
-            grip |= CropGrip.Bottom;
+            return horizontal | vertical;
         }
 
-        // Not on an edge, but inside: the whole frame moves.
-        return grip == CropGrip.None && _frame.Contains(point) ? CropGrip.All : grip;
+        if (horizontal != CropGrip.None && onMiddleRow)
+        {
+            return horizontal;
+        }
+
+        if (vertical != CropGrip.None && onMiddleColumn)
+        {
+            return vertical;
+        }
+
+        // Not on a handle, but inside: the whole frame moves.
+        return _frame.Contains(point) ? CropGrip.All : CropGrip.None;
     }
 
     /// <summary>Moves the gripped edges of a frame, keeping it the right way out.</summary>

@@ -63,7 +63,16 @@
       <!-- ============================================================================
            Menu
            ============================================================================ -->
-      <Menu DockPanel.Dock="Top">
+      <!-- The menu bar, with Settings pinned to the end of it.
+
+           The button is not a menu and is not the same colour as one, and both of those are
+           deliberate. Every application buries its settings somewhere different - File, Edit,
+           Tools, a gear in a corner - so the only way to make them findable is to put them
+           where nothing else is and make them look like nothing else. It is the last thing on
+           the row, immediately right of View, and it is the only accented control up here. -->
+      <DockPanel DockPanel.Dock="Top" LastChildFill="False">
+
+      <Menu DockPanel.Dock="Left">
         <MenuItem Header="_File">
           <MenuItem Header="_New…" InputGesture="Ctrl+N" Command="{Binding NewDocumentCommand}" />
           <MenuItem Header="_Open…" InputGesture="Ctrl+O" Command="{Binding OpenCommand}" />
@@ -144,8 +153,30 @@
 
         <MenuItem Header="_Layer">
           <MenuItem Header="_New Layer" Command="{Binding Layers.AddLayerCommand}" />
+          <MenuItem Header="New _Background"
+                    Command="{Binding Layers.AddBackgroundLayerCommand}"
+                    ToolTip.Tip="Opaque white, at the bottom of the stack, and the same on every frame" />
           <MenuItem Header="_Duplicate Layer" Command="{Binding Layers.DuplicateLayerCommand}" />
           <MenuItem Header="De_lete Layer" Command="{Binding Layers.DeleteLayerCommand}" />
+          <Separator />
+          <MenuItem Header="Cop_y Layer"
+                    Command="{Binding Layers.CopyLayerCommand}"
+                    ToolTip.Tip="Copy the whole layer — its name, its opacity and every frame's drawing" />
+          <MenuItem Header="_Paste Layer" Command="{Binding Layers.PasteLayerCommand}" />
+          <MenuItem Header="_Merge Layers"
+                    Command="{Binding Layers.MergeLayersCommand}"
+                    ToolTip.Tip="Bake the marked layers into one, on every frame" />
+          <Separator />
+
+          <!-- The two answers to "I want this on every frame". The first is one drawing shared
+               by the timeline, which is what a background wants; the second makes independent
+               copies, which is what a starting point wants. -->
+          <MenuItem Header="_Same on Every Frame"
+                    Command="{Binding Layers.ToggleContinuousCommand}"
+                    ToolTip.Tip="One drawing shared by the whole timeline, including frames added later" />
+          <MenuItem Header="Copy to All _Frames"
+                    Command="{Binding Layers.CopyToAllFramesCommand}"
+                    ToolTip.Tip="Put this frame's drawing on every other frame as separate copies" />
           <Separator />
           <MenuItem Header="Move _Up" Command="{Binding Layers.MoveLayerUpCommand}" />
           <MenuItem Header="Move _Down" Command="{Binding Layers.MoveLayerDownCommand}" />
@@ -233,6 +264,26 @@
           </MenuItem>
         </MenuItem>
       </Menu>
+
+        <Button DockPanel.Dock="Left"
+                Classes="settingsEntry"
+                Command="{Binding OpenSettingsCommand}"
+                VerticalAlignment="Center"
+                Margin="6,0,0,0"
+                ToolTip.Tip="Everything you can change about the editor, in one place - appearance, canvas, layers, tools and animation">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Path Data="M8,5.4 A2.6,2.6 0 1,0 8,10.6 A2.6,2.6 0 1,0 8,5.4 M8,1.4 L9.1,1.4 L9.5,3.3 L11,4 L12.6,3 L13.4,3.8 L12.4,5.4 L13.1,6.9 L15,7.3 L15,8.7 L13.1,9.1 L12.4,10.6 L13.4,12.2 L12.6,13 L11,12 L9.5,12.7 L9.1,14.6 L6.9,14.6 L6.5,12.7 L5,12 L3.4,13 L2.6,12.2 L3.6,10.6 L2.9,9.1 L1,8.7 L1,7.3 L2.9,6.9 L3.6,5.4 L2.6,3.8 L3.4,3 L5,4 L6.5,3.3 L6.9,1.4 Z"
+                  Stroke="{Binding $parent[Button].Foreground}"
+                  StrokeThickness="1.2"
+                  StrokeJoin="Round"
+                  Width="15" Height="15"
+                  Stretch="Uniform"
+                  VerticalAlignment="Center" />
+            <TextBlock Text="Settings" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+
+      </DockPanel>
 
       <!-- ============================================================================
            Tool options

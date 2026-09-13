@@ -1,0 +1,291 @@
+<!--
+  Settings: everything about the editor an artist can change, sorted by what it is about.
+
+  Every control here binds straight to the shared settings object the editor is already
+  reading, so a change takes effect behind the dialog while it is still open. That is why
+  there is one Close button rather than an OK and a Cancel - there is nothing waiting to be
+  applied and nothing to put back.
+
+  The tabs are declared in the order the SettingsSection enumeration lists them, which is what
+  lets the layers panel's own settings button open straight onto the Layers tab by number.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="using:XPXel.UI.Converters"
+             xmlns:dialogs="using:XPXel.UI.ViewModels.Dialogs"
+             xmlns:drawing="using:XPXel.Core.Drawing"
+             xmlns:services="using:XPXel.UI.Services"
+             x:Class="XPXel.UI.Views.SettingsDialogView"
+             x:DataType="dialogs:SettingsDialogViewModel">
+
+  <UserControl.Styles>
+    <!-- One rule for every line of a settings page, so that a label and its control line up
+         down the whole dialog however many pages it grows to. -->
+    <Style Selector="TextBlock.settingNote">
+      <Setter Property="Foreground" Value="{DynamicResource XpSubtleForegroundBrush}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Margin" Value="24,-2,0,4" />
+      <Setter Property="MaxWidth" Value="420" />
+    </Style>
+    <Style Selector="TextBlock.settingGroup">
+      <Setter Property="Foreground" Value="{DynamicResource XpForegroundBrush}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Margin" Value="0,6,0,0" />
+    </Style>
+  </UserControl.Styles>
+
+  <Border Classes="dialogSurface" MinWidth="520" MaxWidth="640">
+    <DockPanel LastChildFill="True">
+
+      <TextBlock DockPanel.Dock="Top"
+                 Text="{Binding Title}"
+                 FontSize="16"
+                 FontWeight="SemiBold"
+                 Margin="0,0,0,12" />
+
+      <StackPanel DockPanel.Dock="Bottom"
+                  Orientation="Horizontal"
+                  HorizontalAlignment="Right"
+                  Margin="0,14,0,0"
+                  Spacing="8">
+        <TextBlock Text="Changes take effect straight away."
+                   Classes="subtle"
+                   VerticalAlignment="Center"
+                   Margin="0,0,8,0" />
+        <Button Content="Close" IsDefault="True" Command="{Binding CloseCommand}" />
+      </StackPanel>
+
+      <TabControl SelectedIndex="{Binding SectionIndex, Mode=TwoWay}" MinHeight="330">
+
+        <!-- ============================================================================
+             Appearance
+             ============================================================================ -->
+        <TabItem Header="Appearance">
+          <ScrollViewer>
+            <StackPanel Spacing="6" Margin="4,10,4,4">
+
+              <TextBlock Text="Theme" Classes="settingGroup" />
+              <RadioButton GroupName="SettingsTheme"
+                           Content="Follow the system"
+                           IsChecked="{Binding Theme, Converter={x:Static conv:EnumMatchConverter.Instance}, ConverterParameter={x:Static services:AppTheme.System}}" />
+              <RadioButton GroupName="SettingsTheme"
+                           Content="Light"
+                           IsChecked="{Binding Theme, Converter={x:Static conv:EnumMatchConverter.Instance}, ConverterParameter={x:Static services:AppTheme.Light}}" />
+              <RadioButton GroupName="SettingsTheme"
+                           Content="Dark"
+                           IsChecked="{Binding Theme, Converter={x:Static conv:EnumMatchConverter.Instance}, ConverterParameter={x:Static services:AppTheme.Dark}}" />
+              <TextBlock Classes="settingNote"
+                         Text="Panels, arrangements and saved layouts live in the View menu, because they are about this window rather than about the editor." />
+
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================================
+             Canvas
+             ============================================================================ -->
+        <TabItem Header="Canvas">
+          <ScrollViewer>
+            <StackPanel Spacing="4" Margin="4,10,4,4">
+
+              <TextBlock Text="What is drawn over the artwork" Classes="settingGroup" />
+              <CheckBox Content="Pixel grid"
+                        IsChecked="{Binding Canvas.ShowPixelGrid, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="A one-pixel grid, drawn once the zoom is high enough to warrant it. Turn it off to see the image as it will be exported." />
+
+              <CheckBox Content="Rulers"
+                        IsChecked="{Binding Canvas.ShowRulers, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="The numbered strips along the top and left edges." />
+
+              <CheckBox Content="Colour marker by the cursor"
+                        IsChecked="{Binding Canvas.ShowColorSwatchCursor, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="A dot of the drawing colour follows the pointer, so the colour a stroke is about to lay down is visible without looking away." />
+
+              <TextBlock Text="Transparency" Classes="settingGroup" />
+              <CheckBox Content="Chequered pattern behind the artwork"
+                        IsChecked="{Binding Canvas.ShowTransparencyChecker, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="Marks the pixels that are not painted at all. A transparent pixel and a white one are otherwise the same picture." />
+
+              <CheckBox Content="Chequered pattern over the artwork"
+                        IsChecked="{Binding Canvas.ShowArtworkChecker, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="The same pattern as a texture over the pixels you have painted. A look rather than information, so it is off by default." />
+
+              <TextBlock Text="Zoom" Classes="settingGroup" />
+              <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2,0,0">
+                <TextBlock Grid.Column="0" Text="Zoom speed" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="10,0"
+                        Minimum="0.25" Maximum="3"
+                        TickFrequency="0.25" IsSnapToTickEnabled="True"
+                        Value="{Binding Canvas.ZoomSpeed, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2"
+                           Text="{Binding Canvas.ZoomSpeed, StringFormat={}{0:F2}×}"
+                           Classes="subtle" Width="46" TextAlignment="Right" VerticalAlignment="Center" />
+              </Grid>
+              <TextBlock Classes="settingNote"
+                         Text="How far one wheel notch or one zoom command travels. Someone drawing a 16×16 icon wants to creep; someone on a 512-pixel background wants to cross the range in a few notches." />
+
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================================
+             Layers
+             ============================================================================ -->
+        <TabItem Header="Layers">
+          <ScrollViewer>
+            <StackPanel Spacing="4" Margin="4,10,4,4">
+
+              <TextBlock Text="Protecting what is already there" Classes="settingGroup" />
+
+              <CheckBox Content="Applying a transform makes a new layer when it would cover something"
+                        IsChecked="{Binding Layers.TransformToNewLayer, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="Only when it actually would. A transform that lands in empty space, or that scales a whole layer in place, has nothing to destroy and stays where it is." />
+
+              <CheckBox Content="Pasting from another program makes a new layer"
+                        IsChecked="{Binding Layers.PasteToNewLayer, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="An image from a browser or another editor has nothing to do with the layer it lands on, so it is kept separate. Pixels copied inside XP-xel always go onto the layer you are on — to copy a whole layer, use Copy Layer in the layers panel." />
+
+              <TextBlock Classes="settingNote"
+                         Margin="0,10,0,0"
+                         Text="Both are on because placing artwork over a drawing is the fastest way in any pixel editor to destroy work you cannot comfortably undo your way back to. Turn them off if you work on one layer on purpose." />
+
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================================
+             Tools
+             ============================================================================ -->
+        <TabItem Header="Tools">
+          <ScrollViewer>
+            <StackPanel Spacing="4" Margin="4,10,4,4">
+
+              <TextBlock Text="Brush" Classes="settingGroup" />
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Size" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="10,0"
+                        Minimum="1" Maximum="64"
+                        Value="{Binding Tools.BrushSize, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="{Binding Tools.BrushSize}"
+                           Classes="subtle" Width="34" TextAlignment="Right" VerticalAlignment="Center" />
+              </Grid>
+
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Softness" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="10,0"
+                        Minimum="0" Maximum="100"
+                        Value="{Binding Tools.BrushSoftness, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="{Binding Tools.BrushSoftness}"
+                           Classes="subtle" Width="34" TextAlignment="Right" VerticalAlignment="Center" />
+              </Grid>
+
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Shape" Classes="subtle" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" Margin="10,0,0,0"
+                          HorizontalAlignment="Stretch"
+                          ItemsSource="{x:Static dialogs:SettingsDialogViewModel.BrushShapes}"
+                          SelectedItem="{Binding Tools.BrushShape, Mode=TwoWay}" />
+              </Grid>
+              <TextBlock Classes="settingNote"
+                         Text="The pen-xel ignores both of these on purpose: it is square by definition, which is what makes its edges clean." />
+
+              <TextBlock Text="Shapes" Classes="settingGroup" />
+              <CheckBox Content="Fill rectangles and ellipses"
+                        IsChecked="{Binding Tools.IsShapeFilled, Mode=TwoWay}" />
+
+              <TextBlock Text="Bucket fill" Classes="settingGroup" />
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Tolerance" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="10,0"
+                        Minimum="0" Maximum="255"
+                        Value="{Binding Tools.FillTolerance, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="{Binding Tools.FillTolerance}"
+                           Classes="subtle" Width="34" TextAlignment="Right" VerticalAlignment="Center" />
+              </Grid>
+              <CheckBox Content="Contiguous"
+                        IsChecked="{Binding Tools.IsFillContiguous, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="Fill only the pixels connected to the one clicked, rather than every matching pixel on the layer." />
+
+              <TextBlock Text="Text" Classes="settingGroup" />
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Size" Classes="subtle" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Margin="10,0,0,0"
+                               Minimum="4" Maximum="256" Increment="1" FormatString="0"
+                               Value="{Binding Tools.TextDefaults.FontSize, Mode=TwoWay}" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="14">
+                <CheckBox Content="Bold" IsChecked="{Binding Tools.TextDefaults.IsBold, Mode=TwoWay}" />
+                <CheckBox Content="Italic" IsChecked="{Binding Tools.TextDefaults.IsItalic, Mode=TwoWay}" />
+              </StackPanel>
+              <TextBlock Classes="settingNote"
+                         Text="These are the defaults new text starts from. Typeface and alignment are in the Text panel, where they apply to the layer being edited." />
+
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================================
+             Animation
+             ============================================================================ -->
+        <TabItem Header="Animation">
+          <ScrollViewer>
+            <StackPanel Spacing="4" Margin="4,10,4,4">
+
+              <TextBlock Text="Onion skin" Classes="settingGroup" />
+              <CheckBox Content="Ghost the neighbouring frames under this one"
+                        IsChecked="{Binding OnionSkin.IsEnabled, Mode=TwoWay}" />
+
+              <Grid ColumnDefinitions="Auto,*" Margin="0,4,0,0">
+                <TextBlock Grid.Column="0" Text="Frames before" Classes="subtle" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Margin="10,0,0,0"
+                               Minimum="0" Maximum="3" Increment="1" FormatString="0"
+                               IsEnabled="{Binding OnionSkin.IsEnabled}"
+                               Value="{Binding OnionSkin.FramesBefore, Mode=TwoWay}" />
+              </Grid>
+              <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Frames after" Classes="subtle" VerticalAlignment="Center" />
+                <NumericUpDown Grid.Column="1" Margin="10,0,0,0"
+                               Minimum="0" Maximum="3" Increment="1" FormatString="0"
+                               IsEnabled="{Binding OnionSkin.IsEnabled}"
+                               Value="{Binding OnionSkin.FramesAfter, Mode=TwoWay}" />
+              </Grid>
+
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Strength" Classes="subtle" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Margin="10,0"
+                        Minimum="0" Maximum="100"
+                        IsEnabled="{Binding OnionSkin.IsEnabled}"
+                        Value="{Binding OnionSkin.Opacity, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="{Binding OnionSkin.Opacity}"
+                           Classes="subtle" Width="34" TextAlignment="Right" VerticalAlignment="Center" />
+              </Grid>
+
+              <CheckBox Content="Tint the ghosts"
+                        IsEnabled="{Binding OnionSkin.IsEnabled}"
+                        IsChecked="{Binding OnionSkin.IsTinted, Mode=TwoWay}" />
+              <TextBlock Classes="settingNote"
+                         Text="Earlier and later frames get different colours, so it is obvious which way a pose is travelling." />
+
+              <TextBlock Classes="settingNote"
+                         Margin="0,10,0,0"
+                         Text="An animation covers the whole timeline unless you say otherwise, so a frame added later plays without anything having to be adjusted. Ranges are set per animation in the timeline's strip." />
+
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+      </TabControl>
+
+    </DockPanel>
+  </Border>
+
+</UserControl>

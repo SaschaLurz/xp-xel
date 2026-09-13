@@ -33,10 +33,25 @@ public sealed class ClipboardTests
     }
 
     [Fact]
-    public void CopyingNothingProducesNoClip()
+    public void CopyingWithNothingMarkedTakesTheWholeLayer()
     {
         Fixture fixture = new();
-        fixture.Fill(new ImageRect(0, 0, 8, 8), Red);
+        fixture.Fill(new ImageRect(2, 2, 3, 3), Red);
+
+        // Refusing was a dead end: there was no other way to get a layer onto the clipboard,
+        // so "mark something first" left an artist who wanted the whole layer with nowhere to
+        // go. The clip is the size of the artwork, not of the canvas.
+        PixelClip clip = PixelClip.FromSelection(fixture.Workspace)!;
+
+        Assert.Equal(new ImageSize(3, 3), clip.Size);
+        Assert.Equal(new ImagePoint(2, 2), clip.Origin);
+        Assert.Equal(Red, clip.Pixels[0]);
+    }
+
+    [Fact]
+    public void CopyingAnEmptyLayerStillProducesNoClip()
+    {
+        Fixture fixture = new();
 
         Assert.Null(PixelClip.FromSelection(fixture.Workspace));
     }
@@ -64,13 +79,17 @@ public sealed class ClipboardTests
     }
 
     [Fact]
-    public void PastingStampsTheClipAndLeavesItFloating()
+    public void PastingStampsTheClipAndLeavesItFloatingInATransformBox()
     {
         Fixture fixture = new();
         PixelClip clip = PixelClip.FromImage(new ImageSize(2, 1), [Red, Blue]);
 
         Assert.True(fixture.Workspace.BeginPaste(clip));
-        Assert.NotNull(fixture.Workspace.ActiveTransform);
+
+        // A box with handles rather than pixels merely in the hand, so what arrived can be
+        // resized before it is placed instead of afterwards as a second undoable act.
+        Assert.NotNull(fixture.Workspace.ActiveFreeTransform);
+        Assert.Equal(FreeTransformScope.Clip, fixture.Workspace.ActiveFreeTransform!.Scope);
 
         // An 8×8 canvas and a 2×1 clip with no origin: centred, so (3, 3).
         Assert.Equal(Red, fixture.Sample(3, 3));
@@ -86,11 +105,31 @@ public sealed class ClipboardTests
         Fixture fixture = new();
 
         fixture.Workspace.BeginPaste(PixelClip.FromImage(new ImageSize(2, 1), [Red, Blue]));
-        fixture.Workspace.ActiveTransform!.MoveBy(-3, -3);
+        fixture.Workspace.ActiveFreeTransform!.MoveBy(-3, -3);
 
-        Assert.True(fixture.Workspace.CommitTransform());
+        Assert.True(fixture.Workspace.CommitFreeTransform());
         Assert.Equal(Red, fixture.Sample(0, 0));
         Assert.True(fixture.Sample(3, 3).IsTransparent);
+    }
+
+    [Fact]
+    public void PastedPixelsCanBeResizedBeforeTheyArePlaced()
+    {
+        Fixture fixture = new();
+
+        fixture.Workspace.BeginPaste(PixelClip.FromImage(new ImageSize(2, 1), [Red, Blue]));
+
+        FreeTransform box = fixture.Workspace.ActiveFreeTransform!;
+        box.BeginDrag();
+        box.DragEdges(0, 0, 4, 2);
+
+        Assert.True(fixture.Workspace.CommitFreeTransform());
+
+        // Each pixel of the clip became a two-by-two block, in the colour it arrived with.
+        Assert.Equal(Red, fixture.Sample(0, 0));
+        Assert.Equal(Red, fixture.Sample(1, 1));
+        Assert.Equal(Blue, fixture.Sample(2, 0));
+        Assert.Equal(Blue, fixture.Sample(3, 1));
     }
 
     [Fact]
@@ -100,28 +139,78 @@ public sealed class ClipboardTests
         fixture.Fill(new ImageRect(0, 0, 8, 8), Blue);
 
         fixture.Workspace.BeginPaste(PixelClip.FromImage(new ImageSize(2, 1), [Red, Red]));
-        fixture.Workspace.CommitTransform();
+        fixture.Workspace.CommitFreeTransform();
 
         Assert.Equal(1, fixture.Workspace.History.Count);
 
         fixture.Workspace.History.Undo();
 
         // The artwork underneath is back: pasting punches no hole, unlike moving.
+        Assert.Single(fixture.Workspace.Document.Root.Children);
         Assert.Equal(Blue, fixture.Sample(3, 3));
         Assert.Equal(Blue, fixture.Sample(4, 3));
     }
 
     [Fact]
-    public void PastingMarksWhatArrivedSoItCanBeMovedAgain()
+    public void ArtworkFromAnotherProgramLandsOnALayerOfItsOwn()
     {
         Fixture fixture = new();
+        fixture.Fill(new ImageRect(0, 0, 8, 8), Blue);
+
+        fixture.Workspace.BeginPaste(
+            PixelClip.FromImage(new ImageSize(2, 1), [Red, Red]), fromOutside: true);
+        fixture.Workspace.CommitFreeTransform();
+
+        // An image dragged in from a browser has nothing to do with the layer it lands on, so
+        // the blue underneath it is still there rather than having been written over.
+        Assert.Equal(2, fixture.Workspace.Document.Root.Children.Count);
+        Assert.Equal(Red, fixture.Sample(3, 3));
+        Assert.Equal(Blue, fixture.CelPixel((RasterLayer)fixture.Workspace.Document.Root.Children[0], 3, 3));
+    }
+
+    [Fact]
+    public void PixelsCopiedInsideXpXelPasteOntoTheLayerYouAreOn()
+    {
+        Fixture fixture = new();
+        fixture.Fill(new ImageRect(0, 0, 8, 8), Blue);
+
+        fixture.Workspace.BeginPaste(PixelClip.FromImage(new ImageSize(2, 1), [Red, Red]));
+        fixture.Workspace.CommitFreeTransform();
+
+        // The artist knows where these came from. A layer per paste is what turned "put this
+        // background on each frame" into a stack of layers nobody asked for.
+        Assert.Single(fixture.Workspace.Document.Root.Children);
+        Assert.Equal(Red, fixture.Sample(3, 3));
+    }
+
+    [Fact]
+    public void PastingFromOutsideOntoTheSameLayerIsAnOptionTheArtistCanTake()
+    {
+        Fixture fixture = new();
+        fixture.Workspace.LayerSettings.PasteToNewLayer = false;
+        fixture.Fill(new ImageRect(0, 0, 8, 8), Blue);
+
+        fixture.Workspace.BeginPaste(
+            PixelClip.FromImage(new ImageSize(2, 1), [Red, Red]), fromOutside: true);
+        fixture.Workspace.CommitFreeTransform();
+
+        Assert.Single(fixture.Workspace.Document.Root.Children);
+        Assert.Equal(Red, fixture.Sample(3, 3));
+    }
+
+    [Fact]
+    public void PlacingAPasteClearsTheMarks()
+    {
+        Fixture fixture = new();
+        fixture.Fill(new ImageRect(0, 0, 4, 4), Red);
+        fixture.Select(new ImageRect(0, 0, 4, 4));
 
         fixture.Workspace.BeginPaste(PixelClip.FromImage(new ImageSize(2, 1), [Red, Blue]));
-        fixture.Workspace.CommitTransform();
+        fixture.Workspace.CommitFreeTransform();
 
-        Assert.NotNull(fixture.Workspace.Selection);
-        Assert.True(fixture.Workspace.Selection!.IsSelected(3, 3));
-        Assert.False(fixture.Workspace.Selection.IsSelected(5, 3));
+        // Enter means done: the pixels are placed and the outline that was up before they
+        // arrived goes with them.
+        Assert.Null(fixture.Workspace.Selection);
     }
 
     [Fact]
@@ -131,9 +220,10 @@ public sealed class ClipboardTests
         fixture.Fill(new ImageRect(0, 0, 8, 8), Blue);
 
         fixture.Workspace.BeginPaste(PixelClip.FromImage(new ImageSize(2, 1), [Red, Red]));
-        fixture.Workspace.CancelTransform();
+        fixture.Workspace.CancelFreeTransform();
 
         Assert.Equal(Blue, fixture.Sample(3, 3));
+        Assert.Single(fixture.Workspace.Document.Root.Children);
         Assert.Equal(0, fixture.Workspace.History.Count);
     }
 
@@ -149,7 +239,7 @@ public sealed class ClipboardTests
         fixture.Workspace.Selection = null;
 
         fixture.Workspace.BeginPaste(clip);
-        fixture.Workspace.CommitTransform();
+        fixture.Workspace.CommitFreeTransform();
 
         Assert.Equal(Red, fixture.Sample(5, 5));
     }
@@ -234,6 +324,13 @@ public sealed class ClipboardTests
 
         public void Select(ImageRect region) =>
             Workspace.Selection = SelectionMask.FromRect(new ImageSize(8, 8), region);
+
+        /// <summary>Reads a pixel of one layer's own content, in document coordinates.</summary>
+        public PixelColor CelPixel(RasterLayer layer, int x, int y)
+        {
+            Cel cel = Workspace.Document.Cels.Find(layer.Id, Workspace.Document.Frames[0].Id)!;
+            return cel.Pixels.GetPixelOrTransparent(x - cel.Offset.X, y - cel.Offset.Y);
+        }
 
         /// <summary>Reads a pixel of the flattened image.</summary>
         public PixelColor Sample(int x, int y)

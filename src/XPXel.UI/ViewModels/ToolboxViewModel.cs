@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using XPXel.Core.Drawing;
 using XPXel.Core.Editing;
 using XPXel.Core.Tools;
@@ -39,6 +40,75 @@ public sealed record ToolItemViewModel(ITool Tool)
 
     /// <summary>Which groups of settings this tool uses.</summary>
     public ToolOptions Options => ToolPresentations.For(Tool.Id).Options;
+
+    /// <summary>
+    /// The slot this tool shares with the tools that do the same job differently, or its own
+    /// identity when it has a slot to itself.
+    /// </summary>
+    public string GroupId =>
+        ToolPresentations.For(Tool.Id).Group is { Length: > 0 } group ? group : Tool.Id;
+}
+
+/// <summary>
+/// One square of the toolbox, holding either a single tool or a group of related ones.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why the toolbox is squares rather than tools.</b> Fourteen tools in a two-wide panel is
+/// a tall ribbon to read, and several of them are plainly the same job done differently — the
+/// pen-xel and the brush, the three shapes, the three ways of marking pixels. Collapsing each
+/// of those into one square, with the rest a right-click away, is what Photoshop does and what
+/// anyone arriving from it already knows how to use.
+/// </para>
+/// <para>
+/// <b>The slot remembers which member was last used</b>, so a slot set to the ellipse stays on
+/// the ellipse until the artist says otherwise. That is the half of the gesture people
+/// actually rely on: the flyout is opened rarely, and the square has to keep meaning whatever
+/// it was left meaning.
+/// </para>
+/// <para>
+/// Every member keeps its own single-key shortcut, so nothing about grouping makes a tool
+/// harder to reach from the keyboard.
+/// </para>
+/// </remarks>
+public sealed partial class ToolSlotViewModel : ViewModelBase
+{
+    /// <summary>The member currently shown on the square.</summary>
+    [ObservableProperty]
+    private ToolItemViewModel _current;
+
+    /// <summary>Initialises the slot.</summary>
+    /// <param name="members">The tools sharing this square, in toolbox order.</param>
+    /// <param name="choose">Puts one of them in the artist's hand.</param>
+    public ToolSlotViewModel(IReadOnlyList<ToolItemViewModel> members, Action<ToolItemViewModel> choose)
+    {
+        ArgumentNullException.ThrowIfNull(members);
+        ArgumentNullException.ThrowIfNull(choose);
+
+        Members = members;
+        _current = members[0];
+        ChooseCommand = new RelayCommand<ToolItemViewModel>(tool =>
+        {
+            if (tool is not null)
+            {
+                choose(tool);
+            }
+        });
+    }
+
+    /// <summary>The tools sharing this square.</summary>
+    public IReadOnlyList<ToolItemViewModel> Members { get; }
+
+    /// <summary>Gets a value indicating whether this square holds more than one tool.</summary>
+    public bool HasSeveral => Members.Count > 1;
+
+    /// <summary>Puts one of this square's tools in the artist's hand.</summary>
+    public IRelayCommand<ToolItemViewModel> ChooseCommand { get; }
+
+    /// <summary>Whether a tool belongs to this square.</summary>
+    /// <param name="tool">The tool to look for.</param>
+    /// <returns><see langword="true"/> if it is one of the members.</returns>
+    public bool Contains(ToolItemViewModel tool) => Members.Contains(tool);
 }
 
 /// <summary>
@@ -56,8 +126,20 @@ public sealed partial class ToolboxViewModel : ViewModelBase
 
     private readonly ISettingsStore _settings;
 
+    /// <summary>Guards the two-way trip between the chosen tool and the chosen square.</summary>
+    /// <remarks>
+    /// Picking a tool has to highlight its square, and highlighting a square has to pick its
+    /// tool, so each side sets the other and without this the pair would chase each other
+    /// round. Guarding is simpler than trying to make one of the two directions unnecessary,
+    /// because both genuinely happen: the keyboard drives the first and the mouse the second.
+    /// </remarks>
+    private bool _isSyncingSelection;
+
     [ObservableProperty]
     private ToolItemViewModel? _selectedTool;
+
+    [ObservableProperty]
+    private ToolSlotViewModel? _selectedSlot;
 
     /// <summary>Initialises the toolbox.</summary>
     /// <param name="registry">The available tools.</param>
@@ -78,14 +160,24 @@ public sealed partial class ToolboxViewModel : ViewModelBase
             Tools.Add(new ToolItemViewModel(tool));
         }
 
+        Slots = [.. BuildSlots(Tools, tool => SelectedTool = tool)];
+
         // Restore the tool from the previous session, falling back to the first registered
         // tool when the setting is absent or names a tool this build does not have.
         string? storedId = settings.GetValue(SettingsKey);
         _selectedTool = Tools.FirstOrDefault(t => t.Tool.Id == storedId) ?? Tools.FirstOrDefault();
+
+        // Set directly rather than through the property, because the generated change handler
+        // has not run for the field assignment above and sizes are remembered per tool.
+        toolSettings.ActiveToolId = _selectedTool?.Tool.Id ?? string.Empty;
+        SyncSlotsToSelectedTool();
     }
 
     /// <summary>The available tools, in toolbox order.</summary>
     public ObservableCollection<ToolItemViewModel> Tools { get; }
+
+    /// <summary>The toolbox's squares, in the order they are shown.</summary>
+    public ObservableCollection<ToolSlotViewModel> Slots { get; }
 
     /// <summary>The shared tool options, bound directly by the options bar.</summary>
     public ToolSettings ToolSettings { get; }
@@ -179,9 +271,84 @@ public sealed partial class ToolboxViewModel : ViewModelBase
         return true;
     }
 
+    /// <summary>
+    /// Sorts the tools into squares, grouping the ones that name a common leader.
+    /// </summary>
+    /// <remarks>
+    /// A square appears where the first of its members is registered, so the order the toolbox
+    /// shows is still decided entirely by <c>AppServices</c> and a tool added there turns up
+    /// without this method changing.
+    /// </remarks>
+    private static List<ToolSlotViewModel> BuildSlots(
+        IEnumerable<ToolItemViewModel> tools,
+        Action<ToolItemViewModel> choose)
+    {
+        List<string> order = [];
+        Dictionary<string, List<ToolItemViewModel>> grouped = new(StringComparer.Ordinal);
+
+        foreach (ToolItemViewModel tool in tools)
+        {
+            if (!grouped.TryGetValue(tool.GroupId, out List<ToolItemViewModel>? members))
+            {
+                members = [];
+                grouped.Add(tool.GroupId, members);
+                order.Add(tool.GroupId);
+            }
+
+            members.Add(tool);
+        }
+
+        return [.. order.Select(id => new ToolSlotViewModel(grouped[id], choose))];
+    }
+
+    /// <summary>Puts the highlight on the square holding the chosen tool, and shows it there.</summary>
+    private void SyncSlotsToSelectedTool()
+    {
+        if (_isSyncingSelection || SelectedTool is not { } tool)
+        {
+            return;
+        }
+
+        _isSyncingSelection = true;
+
+        try
+        {
+            foreach (ToolSlotViewModel slot in Slots)
+            {
+                if (!slot.Contains(tool))
+                {
+                    continue;
+                }
+
+                slot.Current = tool;
+                SelectedSlot = slot;
+                return;
+            }
+        }
+        finally
+        {
+            _isSyncingSelection = false;
+        }
+    }
+
+    partial void OnSelectedSlotChanged(ToolSlotViewModel? value)
+    {
+        // Clicking a square picks whichever of its tools it is currently showing.
+        if (!_isSyncingSelection && value is not null)
+        {
+            SelectedTool = value.Current;
+        }
+    }
+
     partial void OnSelectedToolChanged(ToolItemViewModel? value)
     {
+        SyncSlotsToSelectedTool();
+
         _settings.SetValue(SettingsKey, value?.Tool.Id);
+
+        // Size is remembered per tool, so the settings object has to be told which tool the
+        // options bar and the brush preview are now describing.
+        ToolSettings.ActiveToolId = value?.Tool.Id ?? string.Empty;
 
         OnPropertyChanged(nameof(ActiveTool));
         OnPropertyChanged(nameof(ActiveToolName));

@@ -5,9 +5,16 @@
   a toolbox needs, and getting it from the control means there is no "which button is on"
   state to keep in sync.
 
-  Two columns rather than one. A single column of eleven tools makes the left dock a tall
-  ribbon that wastes the width it is given and pushes the canvas over; two keeps the panel
-  square-ish and every tool on screen without scrolling.
+  Each square is a *slot*, not a tool. Tools that do the same job differently share one -
+  the pen-xel and the brush, the three shapes, the three ways of marking pixels - and
+  right-clicking a shared square offers the rest, which is the arrangement anyone arriving
+  from Photoshop already has in their hands. A slot remembers which of its tools was last
+  used, so a square left on the ellipse stays on the ellipse. Which tools share a slot is
+  declared in ToolPresentations beside their icons, so this file never changes for it.
+
+  Two columns rather than one. A single column makes the left dock a tall ribbon that wastes
+  the width it is given and pushes the canvas over; two keeps the panel square-ish and every
+  tool on screen without scrolling.
 
   Icons are vector geometry from ToolIcons, stroked rather than filled so the whole set reads
   with one weight. They are bound rather than declared here so that the toolbox stays driven
@@ -19,8 +26,8 @@
              x:Class="XPXel.UI.Views.ToolboxView"
              x:DataType="vm:ToolboxViewModel">
 
-  <ListBox ItemsSource="{Binding Tools}"
-           SelectedItem="{Binding SelectedTool, Mode=TwoWay}"
+  <ListBox ItemsSource="{Binding Slots}"
+           SelectedItem="{Binding SelectedSlot, Mode=TwoWay}"
            Padding="4"
            HorizontalAlignment="Left"
            Background="Transparent"
@@ -61,21 +68,60 @@
       <Style Selector="ListBoxItem:selected TextBlock.toolShortcut">
         <Setter Property="Opacity" Value="0.85" />
       </Style>
+
+      <!-- The corner mark that says "there is more than one tool in here". Small and dim for
+           the same reason the shortcut letter is: it has to be findable once and then stop
+           competing with the icon for the rest of the day. -->
+      <Style Selector="ListBoxItem Path.toolGroupMark">
+        <Setter Property="Fill" Value="{Binding $parent[ListBoxItem].Foreground}" />
+        <Setter Property="Opacity" Value="0.55" />
+      </Style>
+
+      <Style Selector="ListBoxItem:selected Path.toolGroupMark">
+        <Setter Property="Opacity" Value="0.9" />
+      </Style>
     </ListBox.Styles>
 
     <ListBox.ItemTemplate>
-      <DataTemplate x:DataType="vm:ToolItemViewModel">
+      <DataTemplate x:DataType="vm:ToolSlotViewModel">
         <Border Background="Transparent" ToolTip.Placement="Right">
           <ToolTip.Tip>
             <StackPanel MaxWidth="280">
-              <TextBlock Text="{Binding HeaderText}" FontWeight="SemiBold" />
-              <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,3,0,0" />
+              <TextBlock Text="{Binding Current.HeaderText}" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Current.Description}" TextWrapping="Wrap" Margin="0,3,0,0" />
+              <TextBlock Text="Right-click for the other tools in this slot."
+                         IsVisible="{Binding HasSeveral}"
+                         Opacity="0.7"
+                         FontSize="11"
+                         TextWrapping="Wrap"
+                         Margin="0,5,0,0" />
             </StackPanel>
           </ToolTip.Tip>
 
+          <!-- The group menu.
+
+               A ContextMenu rather than a ContextFlyout: the toolbox lives inside a dock
+               panel that has a context menu of its own, and a flyout on a child was losing
+               the right-click to it. Every square carries one, and the ones holding a single
+               tool simply list that tool - cheaper to reason about than two templates that
+               have to be kept looking identical. -->
+          <Border.ContextMenu>
+            <ContextMenu ItemsSource="{Binding Members}">
+              <ContextMenu.ItemContainerTheme>
+                <ControlTheme TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}"
+                              x:DataType="vm:ToolItemViewModel">
+                  <Setter Property="Header" Value="{Binding HeaderText}" />
+                  <Setter Property="Command"
+                          Value="{Binding $parent[ContextMenu].((vm:ToolSlotViewModel)DataContext).ChooseCommand}" />
+                  <Setter Property="CommandParameter" Value="{Binding}" />
+                </ControlTheme>
+              </ContextMenu.ItemContainerTheme>
+            </ContextMenu>
+          </Border.ContextMenu>
+
           <Panel>
             <Path Classes="toolIcon"
-                  Data="{Binding Icon}"
+                  Data="{Binding Current.Icon}"
                   StrokeThickness="1.5"
                   StrokeJoin="Round"
                   StrokeLineCap="Round"
@@ -88,11 +134,22 @@
             <!-- The key that selects this tool, tucked into the corner. Small and dim on
                  purpose: it has to be findable when an artist wonders "what was the eraser
                  again?" without competing with the icon every other second of the day. -->
-            <TextBlock Text="{Binding Shortcut}"
+            <TextBlock Text="{Binding Current.Shortcut}"
                        Classes="toolShortcut"
                        HorizontalAlignment="Right"
                        VerticalAlignment="Bottom"
                        Margin="0,0,1,0" />
+
+            <!-- A folded corner in the bottom-left, the same mark Photoshop uses for a slot
+                 with more tools behind it. -->
+            <Path Classes="toolGroupMark"
+                  Data="M0,5 L5,5 L5,0 Z"
+                  Width="5" Height="5"
+                  Stretch="Uniform"
+                  IsVisible="{Binding HasSeveral}"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Bottom"
+                  Margin="2,0,0,2" />
           </Panel>
         </Border>
       </DataTemplate>

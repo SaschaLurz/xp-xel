@@ -62,7 +62,7 @@ public sealed class RectangleSelectTool : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (e.Button is not (ToolPointerButton.Left or ToolPointerButton.Right))
+        if (e.Button != ToolPointerButton.Left)
         {
             return;
         }

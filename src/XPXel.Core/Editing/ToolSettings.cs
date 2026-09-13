@@ -10,19 +10,35 @@ namespace XPXel.Core.Editing;
 /// <remarks>
 /// <para>
 /// Settings are kept in one place rather than as fields on each tool so that they can be
-/// bound to the UI, persisted between sessions, and shared where that is what the artist
-/// expects — brush size, for instance, should not reset when switching from pencil to
-/// eraser.
+/// bound to the UI and persisted between sessions, and so that the options bar has one object
+/// to bind to whichever tool is in hand.
+/// </para>
+/// <para>
+/// <b>Size is per tool; everything else is shared.</b> One number for every tool meant that
+/// setting the eraser to twenty made the pen-xel twenty as well, and an artist who rubs out a
+/// patch and goes back to drawing wants their one-pixel pen back, not a twenty-pixel one. Size
+/// is the setting that differs by tool in every editor of this kind, so it is remembered per
+/// tool here — <see cref="ActiveToolId"/> says whose. Shape, softness, tolerance and the rest
+/// stay shared, because there the artist is describing how they want to work rather than what
+/// each tool is for.
 /// </para>
 /// <para>
 /// <b>Growth path.</b> When tools need genuinely private options (a gradient's shape, a
-/// shape tool's fill mode), give each tool its own settings object retrieved by tool id
-/// rather than widening this class indefinitely.
+/// shape tool's fill mode), follow the same pattern <see cref="BrushSize"/> uses rather than
+/// widening this class indefinitely.
 /// </para>
 /// </remarks>
 public sealed class ToolSettings : ObservableModel
 {
-    private int _brushSize = 1;
+    /// <summary>The size each tool was last set to, keyed by tool id.</summary>
+    /// <remarks>
+    /// Sparse: a tool that has never been adjusted has no entry and reports
+    /// <see cref="DefaultBrushSize"/>, which saves seeding the table from a list of tool ids
+    /// that this class has no business knowing.
+    /// </remarks>
+    private readonly Dictionary<string, int> _brushSizes = new(StringComparer.Ordinal);
+
+    private string _activeToolId = string.Empty;
     private BrushShape _brushShape = BrushShape.Square;
     private int _brushSoftness;
     private int _fillTolerance;
@@ -30,14 +46,58 @@ public sealed class ToolSettings : ObservableModel
     private bool _isShapeFilled;
 
     /// <summary>
-    /// The width of the brush in pixels, at least 1. A size of 1 — a single pixel — is the
-    /// default because it is what pixel art is actually drawn with.
+    /// A single pixel: what pixel art is actually drawn with, and what every tool starts at.
+    /// </summary>
+    public const int DefaultBrushSize = 1;
+
+    /// <summary>
+    /// Which tool the size settings currently describe.
+    /// </summary>
+    /// <remarks>
+    /// Set by the toolbox as the artist changes tool. Everything that shows or edits a size —
+    /// the options bar, the right-click panel, the brush preview, Settings — binds to
+    /// <see cref="BrushSize"/> and needs to know nothing about this; changing it simply makes
+    /// that property report a different number.
+    /// </remarks>
+    public string ActiveToolId
+    {
+        get => _activeToolId;
+        set
+        {
+            string id = value ?? string.Empty;
+
+            if (SetProperty(ref _activeToolId, id))
+            {
+                OnPropertyChanged(nameof(BrushSize));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The width of the tool in hand, in pixels, at least 1. Each tool remembers its own.
     /// </summary>
     public int BrushSize
     {
-        get => _brushSize;
-        set => SetProperty(ref _brushSize, Math.Clamp(value, 1, 128));
+        get => _brushSizes.GetValueOrDefault(_activeToolId, DefaultBrushSize);
+        set
+        {
+            int clamped = Math.Clamp(value, 1, 128);
+
+            if (BrushSize == clamped)
+            {
+                return;
+            }
+
+            _brushSizes[_activeToolId] = clamped;
+            OnPropertyChanged(nameof(BrushSize));
+        }
     }
+
+    /// <summary>Returns the size a particular tool is set to.</summary>
+    /// <param name="toolId">The tool's stable identifier.</param>
+    /// <returns>Its size, or <see cref="DefaultBrushSize"/> if it has never been adjusted.</returns>
+    public int GetBrushSize(string toolId) =>
+        _brushSizes.GetValueOrDefault(toolId ?? string.Empty, DefaultBrushSize);
 
     /// <summary>The shape stamped at each point along a stroke.</summary>
     public BrushShape BrushShape

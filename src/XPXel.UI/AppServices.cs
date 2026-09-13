@@ -65,6 +65,11 @@ public static class AppServices
         services.AddSingleton<ToolSettings>();
         services.AddSingleton<ColorSlots>();
 
+        // How layers behave when artwork is placed on them. A way of working rather than a
+        // property of any one picture, so it is shared by every open document exactly as the
+        // tool options are.
+        services.AddSingleton<LayerSettings>();
+
         // Onion skinning is a working aid rather than artwork, so it lives with the other
         // application-wide state and is never written to a project file.
         services.AddSingleton<XPXel.Core.Animation.OnionSkinSettings>();

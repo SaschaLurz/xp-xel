@@ -204,12 +204,15 @@ public partial class MainView : UserControl
                 request = CanvasZoomRequest.Out;
                 break;
 
+            // Fit on zero and 100% on one, which is what Photoshop, Illustrator and Aseprite
+            // all do. XP-xel had them the other way round, and muscle memory built in any of
+            // those three landed on the wrong one every time.
             case Key.D0 or Key.NumPad0:
-                request = CanvasZoomRequest.ActualSize;
+                request = CanvasZoomRequest.Fit;
                 break;
 
             case Key.D1 or Key.NumPad1:
-                request = CanvasZoomRequest.Fit;
+                request = CanvasZoomRequest.ActualSize;
                 break;
 
             default:

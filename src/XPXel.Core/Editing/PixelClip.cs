@@ -123,19 +123,22 @@ public sealed class PixelClip
     {
         ArgumentNullException.ThrowIfNull(workspace);
 
-        if (workspace.Selection is not { IsEmpty: false } selection)
+        if (CollectSources(workspace) is not { Count: > 0 } sources)
         {
             return null;
         }
 
-        ImageRect source = selection.Bounds.Intersect(workspace.Document.Bounds);
+        SelectionMask? selection = workspace.Selection is { IsEmpty: false } marked ? marked : null;
+
+        // With nothing marked, copy everything the marked layers have painted on this frame.
+        // Refusing was the honest answer while there was no other way to copy a layer, and it
+        // was also a dead end: an artist who wants a layer on the clipboard has said so
+        // clearly enough by selecting the layer and pressing the copy key.
+        ImageRect source = selection is not null
+            ? selection.Bounds.Intersect(workspace.Document.Bounds)
+            : MeasurePainted(sources, workspace.Document.Bounds);
 
         if (source.Width <= 0 || source.Height <= 0)
-        {
-            return null;
-        }
-
-        if (CollectSources(workspace) is not { Count: > 0 } sources)
         {
             return null;
         }
@@ -152,7 +155,11 @@ public sealed class PixelClip
                 int sx = source.Left + x;
                 int sy = source.Top + y;
 
-                byte covered = selection.GetCoverage(sx, sy);
+                // With nothing marked, every painted pixel of the layer takes part: the shape
+                // being copied is the artwork itself rather than a marquee around it.
+                byte covered = selection is { } mask
+                    ? mask.GetCoverage(sx, sy)
+                    : Flatten(sources, sx, sy).A > 0 ? byte.MaxValue : (byte)0;
 
                 if (covered == 0)
                 {
@@ -166,6 +173,37 @@ public sealed class PixelClip
         }
 
         return any ? new PixelClip(source.Size, pixels, coverage, new ImagePoint(source.Left, source.Top)) : null;
+    }
+
+    /// <summary>
+    /// The smallest rectangle holding every painted pixel of the cels being copied.
+    /// </summary>
+    /// <remarks>
+    /// Used when nothing is marked, so that copying a layer produces a clip the size of the
+    /// artwork rather than the size of the canvas — which is what makes it paste back somewhere
+    /// sensible and keeps a clip of one small sprite from being mostly nothing.
+    /// </remarks>
+    private static ImageRect MeasurePainted(List<(Cel Cel, double Opacity)> sources, ImageRect canvas)
+    {
+        ImageRect painted = ImageRect.Empty;
+
+        foreach ((Cel cel, _) in sources)
+        {
+            ImageRect visible = cel.Bounds.Intersect(canvas);
+
+            for (int y = visible.Top; y < visible.Bottom; y++)
+            {
+                for (int x = visible.Left; x < visible.Right; x++)
+                {
+                    if (cel.Pixels.GetPixelOrTransparent(x - cel.Offset.X, y - cel.Offset.Y).A > 0)
+                    {
+                        painted = painted.IsEmpty ? new ImageRect(x, y, 1, 1) : painted.Union(x, y);
+                    }
+                }
+            }
+        }
+
+        return painted;
     }
 
     /// <summary>

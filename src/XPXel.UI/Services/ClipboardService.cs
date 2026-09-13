@@ -113,7 +113,7 @@ public sealed class ClipboardService
 
         if (PixelClip.FromSelection(workspace) is not { } clip)
         {
-            return new ClipboardResult(false, "Mark something first — there is nothing to copy");
+            return new ClipboardResult(false, "There is nothing to copy — this layer is empty");
         }
 
         _sessionClip = clip;
@@ -140,7 +140,7 @@ public sealed class ClipboardService
     {
         ArgumentNullException.ThrowIfNull(workspace);
 
-        (PixelClip? clip, string? text) = await ReadAsync().ConfigureAwait(true);
+        (PixelClip? clip, string? text, bool fromOutside) = await ReadAsync().ConfigureAwait(true);
 
         // Words go into words. A clip of pixels means nothing at a caret, and a clipboard
         // carrying both is a clipboard that was filled by copying artwork out of this program -
@@ -150,12 +150,17 @@ public sealed class ClipboardService
             return PasteText(workspace, text);
         }
 
-        clip ??= _sessionClip;
+        if (clip is null && _sessionClip is { } fallback)
+        {
+            // The in-session clip is always XP-xel's own, so it never counts as outside.
+            clip = fallback;
+            fromOutside = false;
+        }
 
         if (clip is not null)
         {
-            return workspace.BeginPaste(clip)
-                ? new ClipboardResult(true, "Pasted — drag it into place, then press Enter. Escape puts it back")
+            return workspace.BeginPaste(clip, fromOutside)
+                ? new ClipboardResult(true, "Pasted — drag or resize it, then press Enter. Escape puts it back")
                 : new ClipboardResult(false, "Nothing to paste onto — the layer is locked, hidden, or not a drawing layer");
         }
 
@@ -236,11 +241,16 @@ public sealed class ClipboardService
     }
 
     /// <summary>Reads whatever the system clipboard is carrying that XP-xel can use.</summary>
-    private static async Task<(PixelClip? Clip, string? Text)> ReadAsync()
+    /// <remarks>
+    /// The third value says whether the artwork came from another program. XP-xel's own private
+    /// format is the tell: nothing else writes it, so anything arriving as a plain bitmap came
+    /// from outside — and that is what decides whether a paste is given a layer of its own.
+    /// </remarks>
+    private static async Task<(PixelClip? Clip, string? Text, bool FromOutside)> ReadAsync()
     {
         if (ResolveClipboard() is not { } clipboard)
         {
-            return (null, null);
+            return (null, null, false);
         }
 
         try
@@ -249,7 +259,7 @@ public sealed class ClipboardService
 
             if (data is null)
             {
-                return (null, null);
+                return (null, null, false);
             }
 
             // XP-xel's own clip first: it is the only form that keeps the alpha, the shape and
@@ -257,24 +267,24 @@ public sealed class ClipboardService
             if (await data.TryGetValueAsync(ClipFormat).ConfigureAwait(true) is { } bytes
                 && PixelClip.TryFromBytes(bytes, out PixelClip? exact))
             {
-                return (exact, null);
+                return (exact, null, false);
             }
 
             if (await data.TryGetBitmapAsync().ConfigureAwait(true) is { } bitmap)
             {
                 using (bitmap)
                 {
-                    return (ClipBitmap.FromBitmap(bitmap), null);
+                    return (ClipBitmap.FromBitmap(bitmap), null, true);
                 }
             }
 
-            return (null, await data.TryGetTextAsync().ConfigureAwait(true));
+            return (null, await data.TryGetTextAsync().ConfigureAwait(true), true);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Same reasoning as the write: a clipboard that will not be read is a reason to fall
             // back, not a reason to interrupt.
-            return (null, null);
+            return (null, null, false);
         }
     }
 

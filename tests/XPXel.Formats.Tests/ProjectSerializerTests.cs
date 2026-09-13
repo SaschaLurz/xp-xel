@@ -242,6 +242,7 @@ public sealed class ProjectSerializerTests
         AnimationTag walk = original.CreateTag("walk", 2, 5);
         walk.Direction = LoopDirection.PingPong;
         walk.RepeatCount = 3;
+        walk.CoversWholeTimeline = true;
 
         PixelDocument reloaded = RoundTrip(original);
 
@@ -258,13 +259,51 @@ public sealed class ProjectSerializerTests
 
         AnimationTag reloadedWalk = reloaded.Tags[1];
         Assert.Equal("walk", reloadedWalk.Name);
-        Assert.Equal(2, reloadedWalk.From);
+
+        // Set to follow the timeline above, so it took the whole of it the moment it was
+        // switched over — and comes back covering the whole of it too.
+        Assert.Equal(0, reloadedWalk.From);
         Assert.Equal(5, reloadedWalk.To);
         Assert.Equal(LoopDirection.PingPong, reloadedWalk.Direction);
         Assert.Equal(3, reloadedWalk.RepeatCount);
 
+        // Whether an animation follows the timeline or has a range of its own is a decision
+        // the artist made, so it has to survive the round trip along with the range itself.
+        Assert.True(reloadedWalk.CoversWholeTimeline);
+        Assert.False(reloadedIdle.CoversWholeTimeline);
+
         // A tag with no colour must reload without one rather than picking up a default.
         Assert.Null(reloadedWalk.Color);
+    }
+
+    [Fact]
+    public void RoundTripsALayerThatIsTheSameOnEveryFrame()
+    {
+        PixelDocument original = PixelDocument.CreateNew(new ImageSize(4, 4));
+        original.CreateFrame();
+        original.CreateFrame();
+
+        RasterLayer background = (RasterLayer)original.Root.Children[0];
+        original.GetOrCreateCel(background, original.Frames[0]).Pixels.Fill(Red);
+        original.SetLayerContinuous(background, continuous: true);
+
+        PixelDocument reloaded = RoundTrip(original);
+        RasterLayer restored = (RasterLayer)reloaded.Root.Children[0];
+
+        // The flag survives, and so does the sharing: one drawing filed under the layer rather
+        // than three copies filed under three frames. Reloading it as copies would look right
+        // and then quietly stop being a background the moment a frame was added.
+        Assert.True(restored.IsContinuous);
+        Assert.Equal(1, reloaded.Cels.Count);
+
+        foreach (Frame frame in reloaded.Frames)
+        {
+            Assert.Equal(Red, reloaded.Cels.Find(restored.Id, frame.Id)!.Pixels.GetPixel(0, 0));
+        }
+
+        // And a frame added after the load still gets it.
+        Frame added = reloaded.CreateFrame();
+        Assert.NotNull(reloaded.Cels.Find(restored.Id, added.Id));
     }
 
     [Fact]

@@ -32,6 +32,7 @@ public abstract class LayerNode : ObservableModel
     private string _name;
     private bool _isVisible = true;
     private bool _isLocked;
+    private bool _isContinuous;
     private double _opacity = 1.0;
     private BlendMode _blendMode = BlendMode.Normal;
     private PixelColor? _tagColor;
@@ -80,6 +81,37 @@ public abstract class LayerNode : ObservableModel
     {
         get => _isLocked;
         set => SetProperty(ref _isLocked, value);
+    }
+
+    /// <summary>
+    /// Whether this layer holds one drawing shared by every frame, rather than a separate
+    /// drawing per frame.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What it is for.</b> A background. Everything else in this document model is per
+    /// frame, which is right for the parts that move and hopeless for the parts that do not:
+    /// putting a white background behind a ten-frame animation otherwise means making the same
+    /// drawing ten times and remembering to change all ten whenever it changes. A continuous
+    /// layer is drawn once, appears on every frame including frames added later, and is edited
+    /// from whichever frame the artist happens to be on.
+    /// </para>
+    /// <para>
+    /// <b>It is genuinely one drawing, not ten copies.</b> <see cref="CelStore"/> keys a
+    /// continuous layer's content by the layer alone, so every frame resolves to the same
+    /// <see cref="Cel"/> object. That is what makes editing it from frame seven show up on
+    /// frame one, and it is why turning the switch off has to hand each frame its own copy.
+    /// </para>
+    /// <para>
+    /// Set it through <see cref="PixelDocument.SetLayerContinuous"/> rather than here, so the
+    /// cel store is re-keyed along with it. Assigning this directly changes the flag and leaves
+    /// the artwork where it was, which is not a state anything else expects.
+    /// </para>
+    /// </remarks>
+    public bool IsContinuous
+    {
+        get => _isContinuous;
+        internal set => SetProperty(ref _isContinuous, value);
     }
 
     /// <summary>

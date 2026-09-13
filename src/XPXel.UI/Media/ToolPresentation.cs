@@ -99,6 +99,18 @@ public enum ToolCursorKind
 /// not — the eraser writes transparency and the marquee writes nothing, so a colour beside
 /// either would be a claim about what is going to happen that is simply untrue.
 /// </param>
+/// <param name="Group">
+/// The identifier of the tool this one shares a toolbox slot with, or empty for a tool that
+/// has a slot to itself.
+/// </param>
+/// <remarks>
+/// <b>About <paramref name="Group"/>.</b> Tools that do the same job in different ways share
+/// one square in the toolbox, and right-clicking it offers the rest — the arrangement every
+/// artist coming from Photoshop already has in their hands. Each member names the same leader,
+/// and the leader names itself; the slot then appears wherever the first of its members is
+/// registered, so <c>AppServices</c> still decides the order. Every tool keeps its own
+/// single-key shortcut, so grouping costs nothing at the keyboard.
+/// </remarks>
 public sealed record ToolPresentation(
     string Icon,
     ToolCursorKind Cursor,
@@ -107,7 +119,8 @@ public sealed record ToolPresentation(
     bool ShowsBrushOutline,
     string Shortcut = "",
     ToolOptions Options = ToolOptions.None,
-    bool ShowsColorSwatch = false);
+    bool ShowsColorSwatch = false,
+    string Group = "");
 
 /// <summary>
 /// Maps a tool's identity to how it is presented.
@@ -133,13 +146,16 @@ public static class ToolPresentations
     private static readonly Dictionary<string, ToolPresentation> ById =
         new(StringComparer.Ordinal)
         {
+            // The pen-xel leads the drawing slot; the brush is the same job done softly, which
+            // is exactly how Photoshop pairs them.
             [PencilTool.ToolId] =
                 new(ToolIcons.Pencil, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "Q",
-                    Options: ToolOptions.Pencil, ShowsColorSwatch: true),
+                    Options: ToolOptions.Pencil, ShowsColorSwatch: true, Group: PencilTool.ToolId),
 
             [BrushTool.ToolId] =
                 new(ToolIcons.Brush, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "B",
-                    Options: ToolOptions.Brush | ToolOptions.Dynamics, ShowsColorSwatch: true),
+                    Options: ToolOptions.Brush | ToolOptions.Dynamics, ShowsColorSwatch: true,
+                    Group: PencilTool.ToolId),
 
             [EraserTool.ToolId] =
                 new(ToolIcons.Eraser, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "E",
@@ -154,35 +170,42 @@ public static class ToolPresentations
             [EyedropperTool.ToolId] =
                 new(ToolIcons.Eyedropper, ToolCursorKind.Icon, 4, 20, ShowsBrushOutline: false, Shortcut: "I"),
 
+            // The three shapes share a slot, as they do in every editor that has them.
             [LineTool.ToolId] =
                 new(ToolIcons.Line, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "L",
-                    Options: ToolOptions.Brush, ShowsColorSwatch: true),
+                    Options: ToolOptions.Brush, ShowsColorSwatch: true, Group: LineTool.ToolId),
 
             [RectangleTool.ToolId] =
                 new(ToolIcons.Rectangle, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "R",
-                    Options: ToolOptions.Brush | ToolOptions.Shape, ShowsColorSwatch: true),
+                    Options: ToolOptions.Brush | ToolOptions.Shape, ShowsColorSwatch: true,
+                    Group: LineTool.ToolId),
 
             [EllipseTool.ToolId] =
                 new(ToolIcons.Ellipse, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true, Shortcut: "O",
-                    Options: ToolOptions.Brush | ToolOptions.Shape, ShowsColorSwatch: true),
+                    Options: ToolOptions.Brush | ToolOptions.Shape, ShowsColorSwatch: true,
+                    Group: LineTool.ToolId),
 
             [TextTool.ToolId] =
                 new(ToolIcons.Text, ToolCursorKind.Text, 12, 12, ShowsBrushOutline: false, Shortcut: "T",
                     Options: ToolOptions.Text, ShowsColorSwatch: true),
 
+            // The three ways of marking pixels share a slot: they answer one question -
+            // "which pixels?" - and differ only in how the artist would rather say it.
             [RectangleSelectTool.ToolId] =
                 new(ToolIcons.Marquee, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "M",
-                    Options: ToolOptions.Selection),
+                    Options: ToolOptions.Selection, Group: RectangleSelectTool.ToolId),
 
             [PixelSelectTool.ToolId] =
                 new(ToolIcons.PixelSelect, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: true,
-                    Shortcut: "K", Options: ToolOptions.Pencil | ToolOptions.Selection),
+                    Shortcut: "K", Options: ToolOptions.Pencil | ToolOptions.Selection,
+                    Group: RectangleSelectTool.ToolId),
 
             // The wand asks the same two questions the bucket does — how close a colour counts,
             // and whether the area has to be joined up — so it shows the same options.
             [MagicWandTool.ToolId] =
                 new(ToolIcons.MagicWand, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false,
-                    Shortcut: "W", Options: ToolOptions.Fill | ToolOptions.Selection),
+                    Shortcut: "W", Options: ToolOptions.Fill | ToolOptions.Selection,
+                    Group: RectangleSelectTool.ToolId),
 
             [MoveTool.ToolId] =
                 new(ToolIcons.Move, ToolCursorKind.Crosshair, 12, 12, ShowsBrushOutline: false, Shortcut: "V"),

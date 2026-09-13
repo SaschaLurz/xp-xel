@@ -56,6 +56,18 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     private readonly IFileDialogService _fileDialog;
     private readonly IThemeService _themeService;
     private readonly ToolSettings _toolSettings;
+    private readonly LayerSettings _layerSettings;
+
+    /// <summary>
+    /// What the animation every new document starts with is called.
+    /// </summary>
+    /// <remarks>
+    /// A document arrives with one layer already in it, and for exactly the same reason it
+    /// arrives with one animation: the artist should be able to start working — or press play —
+    /// without first being made to declare that they intend to. It covers the whole timeline
+    /// and goes on covering it as frames are added, so it never has to be maintained by hand.
+    /// </remarks>
+    private const string DefaultAnimationName = "Animation";
     private readonly ColorSlots _colors;
     private readonly XpDockFactory _factory;
     private readonly DockLayoutStore _layoutStore;
@@ -99,6 +111,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <param name="layoutStore">Remembers the panel arrangement between sessions.</param>
     /// <param name="layoutPresets">Keeps the arrangements the artist has saved by name.</param>
     /// <param name="toolSettings">The shared tool options.</param>
+    /// <param name="layerSettings">The shared layer options.</param>
     /// <param name="colors">The primary and secondary colours.</param>
     public MainViewModel(
         ToolboxViewModel toolbox,
@@ -115,6 +128,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         DockLayoutStore layoutStore,
         LayoutPresetStore layoutPresets,
         ToolSettings toolSettings,
+        LayerSettings layerSettings,
         ColorSlots colors,
         AnimationExportService animationExport,
         AnimationExportRegistry animationFormats,
@@ -135,6 +149,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         ArgumentNullException.ThrowIfNull(layoutStore);
         ArgumentNullException.ThrowIfNull(layoutPresets);
         ArgumentNullException.ThrowIfNull(toolSettings);
+        ArgumentNullException.ThrowIfNull(layerSettings);
         ArgumentNullException.ThrowIfNull(colors);
         ArgumentNullException.ThrowIfNull(timeline);
         ArgumentNullException.ThrowIfNull(preview);
@@ -157,6 +172,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         _layoutStore = layoutStore;
         _layoutPresets = layoutPresets;
         _toolSettings = toolSettings;
+        _layerSettings = layerSettings;
         _colors = colors;
         _animationExport = animationExport;
         _animationFormats = animationFormats;
@@ -169,6 +185,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
         History = history;
 
         Toolbox.PropertyChanged += OnToolboxPropertyChanged;
+
+        // The layers panel has a settings button of its own, opening straight onto the group
+        // it is about. It cannot reach the shell to do that, so the shell hands it the command.
+        Layers.OpenSettingsCommand = OpenSettingsCommand;
 
         _factory = new XpDockFactory(toolbox, layers, palette, brushPanel, textPanel, timeline, preview, history);
         _factory.ActiveDockableChanged += OnActiveDockableChanged;
@@ -183,7 +203,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
 
         RefreshLayouts();
         BuildLayout(restoreSaved: true);
-        AddDocument(new DocumentWorkspace(PixelDocument.CreateNew(new ImageSize(32, 32))), file: null);
+        AddDocument(NewWorkspace(PixelDocument.CreateNew(new ImageSize(32, 32), animationName: DefaultAnimationName)), file: null);
 
         // Started last, once there is a layout to enumerate documents from.
         _autosave.Completed += OnAutosaveCompleted;
@@ -458,7 +478,7 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        AddDocument(new DocumentWorkspace(PixelDocument.CreateNew(size)), file: null);
+        AddDocument(NewWorkspace(PixelDocument.CreateNew(size, animationName: DefaultAnimationName)), file: null);
         StatusMessage = $"New {size} document";
     }
 
@@ -484,7 +504,10 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
             // added.
             bool isProject = _files.IsProjectFile(file.Name);
 
-            DocumentWorkspace workspace = new(document, isProject ? file.TryGetLocalPath() ?? file.Name : null);
+            DocumentWorkspace workspace = new(
+                document,
+                isProject ? file.TryGetLocalPath() ?? file.Name : null,
+                _layerSettings);
             workspace.History.MarkSaved();
 
             AddDocument(workspace, isProject ? file : null);
@@ -673,6 +696,28 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// <param name="theme">The appearance to apply.</param>
     [RelayCommand]
     private void SetTheme(AppTheme theme) => Theme = theme;
+
+    /// <summary>Opens the settings, optionally on a particular group.</summary>
+    /// <param name="section">
+    /// The group to open on, or <see langword="null"/> for the first one. The layers panel
+    /// passes its own so that its settings button lands where the artist expected it to.
+    /// </param>
+    /// <remarks>
+    /// The button that runs this sits at the right-hand end of the menu bar rather than inside
+    /// a menu, and is coloured differently from everything beside it, because "where are the
+    /// settings?" should never be a question anyone has to answer twice.
+    /// </remarks>
+    [RelayCommand]
+    private async Task OpenSettingsAsync(SettingsSection? section)
+    {
+        await Dialogs.ShowAsync(new SettingsDialogViewModel(
+            CanvasSettings,
+            _toolSettings,
+            _layerSettings,
+            CanvasSettings.OnionSkin,
+            _themeService,
+            section ?? SettingsSection.Appearance)).ConfigureAwait(true);
+    }
 
     // ---------------------------------------------------------------------------------
     // View commands
@@ -1143,8 +1188,9 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     /// paste says so in the status bar and changes nothing.
     /// </para>
     /// <para>
-    /// Pasted pixels arrive floating, in the artist's hand: Enter places them, Escape puts them
-    /// back, the arrow keys nudge them. Pasted words arrive as an editable text layer.
+    /// Pasted pixels arrive floating, in a transform box: drag them, pull a handle to resize
+    /// them, nudge them with the arrow keys, then Enter places them and Escape puts them back.
+    /// Pasted words arrive as an editable text layer.
     /// </para>
     /// </remarks>
     [RelayCommand(CanExecute = nameof(HasDocument))]
@@ -1212,6 +1258,12 @@ public sealed partial class MainViewModel : ViewModelBase, IDisposable
     // ---------------------------------------------------------------------------------
     // Documents
     // ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Opens a workspace over a freshly created document, wired to the shared layer options.
+    /// </summary>
+    private DocumentWorkspace NewWorkspace(PixelDocument document) =>
+        new(document, filePath: null, _layerSettings);
 
     /// <summary>Creates a tab for a workspace and brings it to the front.</summary>
     private void AddDocument(DocumentWorkspace workspace, IStorageFile? file)

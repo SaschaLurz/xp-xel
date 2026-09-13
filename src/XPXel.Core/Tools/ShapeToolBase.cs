@@ -30,7 +30,7 @@ namespace XPXel.Core.Tools;
 /// </remarks>
 public abstract class ShapeToolBase : ITool
 {
-    private RasterEditSession? _session;
+    private RasterEditScope? _scope;
     private ImagePoint _anchor;
     private ImagePoint _current;
     private PixelColor _color;
@@ -77,23 +77,23 @@ public abstract class ShapeToolBase : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (e.Button is not (ToolPointerButton.Left or ToolPointerButton.Right))
+        if (e.Button != ToolPointerButton.Left)
         {
             return;
         }
 
         Cancel(context);
 
-        RasterEditSession? session = context.BeginRasterEdit(DisplayName, useSnapshot: true);
-        if (session is null)
+        RasterEditScope? scope = context.BeginRasterEdit(DisplayName, useSnapshot: true);
+        if (scope is null)
         {
             return;
         }
 
-        _session = session;
+        _scope = scope;
         _anchor = e.Position;
         _current = e.Position;
-        _color = context.GetColorForButton(e.Button);
+        _color = context.Colors.Primary;
         _brushSize = context.Settings.BrushSize;
         _brushShape = context.Settings.BrushShape;
         _isFilled = SupportsFill && context.Settings.IsShapeFilled;
@@ -104,7 +104,7 @@ public abstract class ShapeToolBase : ITool
             new ImagePoint(x, y),
             _brushSize,
             _brushShape,
-            (px, py) => session.SetPixel(px, py, _color));
+            (px, py) => scope.SetPixel(px, py, _color));
 
         Redraw();
     }
@@ -114,7 +114,7 @@ public abstract class ShapeToolBase : ITool
     {
         ArgumentNullException.ThrowIfNull(e);
 
-        if (_session is null)
+        if (_scope is null)
         {
             return;
         }
@@ -135,7 +135,7 @@ public abstract class ShapeToolBase : ITool
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(e);
 
-        if (_session is not { } session)
+        if (_scope is not { } scope)
         {
             return;
         }
@@ -147,14 +147,14 @@ public abstract class ShapeToolBase : ITool
             Redraw();
         }
 
-        context.CommitRasterEdit(session);
+        context.CommitRasterEdit(scope);
         Reset();
     }
 
     /// <inheritdoc />
     public void Cancel(ToolContext context)
     {
-        _session?.Rollback();
+        _scope?.Rollback();
         Reset();
     }
 
@@ -163,25 +163,25 @@ public abstract class ShapeToolBase : ITool
     /// </summary>
     private void Redraw()
     {
-        if (_session is not { } session || _plotStamped is null)
+        if (_scope is not { } scope || _plotStamped is null)
         {
             return;
         }
 
-        session.ResetToOriginal();
+        scope.ResetToOriginal();
 
         PlotShape(
             _anchor,
             _current,
             _isFilled,
-            _isFilled ? (x, y) => session.SetPixel(x, y, _color) : _plotStamped);
+            _isFilled ? (x, y) => scope.SetPixel(x, y, _color) : _plotStamped);
 
-        session.PublishInterimChanges();
+        scope.PublishInterimChanges();
     }
 
     private void Reset()
     {
-        _session = null;
+        _scope = null;
         _plotStamped = null;
     }
 }

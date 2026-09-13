@@ -30,11 +30,15 @@ public sealed class PencilTool : StrokeToolBase
     public override string Id => ToolId;
 
     /// <inheritdoc />
-    public override string DisplayName => "Pencil";
+    /// <remarks>
+    /// Not a typo. It only ever draws pixels, so it is the one tool in the box that gets to
+    /// wear the application's name.
+    /// </remarks>
+    public override string DisplayName => "Pen-xel";
 
     /// <inheritdoc />
     public override string Description =>
-        "Draw clean, hard pixels with the primary or secondary colour. Always square, whatever the size.";
+        "Draw clean, hard pixels in the drawing colour. Always square, whatever the size.";
 
     /// <inheritdoc />
     protected override BrushShape ResolveBrushShape(ToolContext context) => BrushShape.Square;
@@ -43,6 +47,6 @@ public sealed class PencilTool : StrokeToolBase
     protected override PixelColor ResolveStrokeColor(ToolContext context, ToolPointerButton button)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.GetColorForButton(button);
+        return context.Colors.Primary;
     }
 }

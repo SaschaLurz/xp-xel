@@ -47,7 +47,7 @@ public sealed class EyedropperTool : ITool
 
         // Continue picking while a button is held, so the artist can scrub across the canvas
         // and watch the colour update.
-        if (e.Button is ToolPointerButton.Left or ToolPointerButton.Right)
+        if (e.Button == ToolPointerButton.Left)
         {
             Pick(context, e);
         }

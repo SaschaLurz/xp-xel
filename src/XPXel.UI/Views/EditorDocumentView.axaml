@@ -87,8 +87,13 @@
       <!-- ================================================================================
            The tool settings panel, opened by right-clicking the canvas.
 
+           The tool's own settings come first, and size is the first of them. This menu is
+           opened mid-stroke to change the one number the artist is thinking about, and putting
+           anything above that means aiming past it every time - so the sliders are at the top
+           and the commands are underneath, where they are still one glance away.
+
            Only the groups the active tool actually uses are shown, so right-clicking with the
-           bucket asks about tolerance and right-clicking with the pencil asks about the brush.
+           bucket asks about tolerance and right-clicking with the pen-xel asks about the brush.
            Which groups those are comes from ToolPresentations, beside the tool's icon and its
            cursor, so a tool gains a settings panel by declaring what it uses rather than by
            this file growing another block.
@@ -109,35 +114,6 @@
                        TextWrapping="Wrap"
                        IsVisible="{Binding !Toolbox.HasToolOptions}" />
 
-            <!-- Marked pixels. First, because when something is marked it is almost always
-                 what the artist opened this menu about.
-
-                 Transform is offered whether or not anything is marked, because with nothing
-                 marked it acts on the marked layers, which is just as often what is wanted.
-                 The other two need marks and are hidden without them. -->
-            <StackPanel Spacing="6">
-              <Button Content="{Binding TransformLabel}"
-                      Command="{Binding TransformCommand}"
-                      HorizontalAlignment="Stretch"
-                      HorizontalContentAlignment="Center"
-                      ToolTip.Tip="Scale, flip or turn what is marked — or everything on the marked layers when nothing is marked. Enter applies, Escape cancels. (Ctrl+T)" />
-
-              <StackPanel Spacing="6" IsVisible="{Binding IsAnythingSelected}">
-                <Button Content="Transform selection"
-                        Command="{Binding TransformSelectionCommand}"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Center"
-                        ToolTip.Tip="Resize, flip or turn the marks themselves. The pixels underneath stay exactly where they are" />
-                <Button Content="{Binding MoveSelectionLabel}"
-                        Command="{Binding MoveSelectionCommand}"
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Center"
-                        ToolTip.Tip="Lift the marked pixels so they can be dragged. Enter places them, Escape puts them back" />
-              </StackPanel>
-
-              <Separator />
-            </StackPanel>
-
             <!-- Brush -->
             <StackPanel Spacing="6" IsVisible="{Binding Toolbox.ShowsBrushOptions}">
               <Grid ColumnDefinitions="Auto,*,Auto">
@@ -153,7 +129,7 @@
                            VerticalAlignment="Center" />
               </Grid>
 
-              <!-- The pencil is square by definition and reads neither of the two sliders
+              <!-- The pen-xel is square by definition and reads neither of the two sliders
                    below, so with it selected this panel offers a size and nothing else. -->
               <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding Toolbox.ShowsBrushShapeOption}">
                 <TextBlock Grid.Column="0" Text="Shape" Classes="subtle" VerticalAlignment="Center" />
@@ -224,6 +200,45 @@
                          Classes="subtle"
                          FontSize="11"
                          TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- Marked pixels, under the tool's own settings.
+
+                 Transform is offered whether or not anything is marked, because with nothing
+                 marked it acts on the marked layers, which is just as often what is wanted.
+                 The other two need marks and are hidden without them. -->
+            <StackPanel Spacing="6">
+              <Separator />
+
+              <Button Content="{Binding TransformLabel}"
+                      Command="{Binding TransformCommand}"
+                      HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Center"
+                      ToolTip.Tip="Scale, flip or turn what is marked — or everything on the marked layers when nothing is marked. Enter applies, Escape cancels. (Ctrl+T)" />
+
+              <StackPanel Spacing="6" IsVisible="{Binding IsAnythingSelected}">
+                <Button Content="Transform selection"
+                        Command="{Binding TransformSelectionCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        ToolTip.Tip="Resize, flip or turn the marks themselves. The pixels underneath stay exactly where they are" />
+                <Button Content="{Binding MoveSelectionLabel}"
+                        Command="{Binding MoveSelectionCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        ToolTip.Tip="Lift the marked pixels so they can be dragged. Enter places them, Escape puts them back" />
+
+                <!-- The one destructive entry, so it is last and it is the only one wearing
+                     the warning colour. Delete and Backspace do the same thing, but the keys
+                     are invisible: having just marked something with the wand, the pointer is
+                     already on the canvas and this menu is one click away. -->
+                <Button Content="Delete marked pixels"
+                        Classes="destructive"
+                        Command="{Binding DeleteMarkedCommand}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        ToolTip.Tip="Clear what is marked, on every marked layer. Delete and Backspace do the same" />
+              </StackPanel>
             </StackPanel>
 
           </StackPanel>

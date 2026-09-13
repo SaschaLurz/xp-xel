@@ -205,6 +205,7 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
                 Color = entry.Color is { Length: > 0 } hex && PixelColor.TryParseHex(hex, out PixelColor color)
                     ? color
                     : null,
+                CoversWholeTimeline = entry.CoversWholeTimeline,
             };
 
             tags.Add(tag);
@@ -250,6 +251,14 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
             : null;
 
         document.InsertLayer(layer, parent);
+
+        // Declared before any cel is restored, so the store files this layer's single drawing
+        // under the layer rather than under a frame. RestoreCels runs after RestoreLayers for
+        // exactly this reason.
+        if (entry.IsContinuous)
+        {
+            document.SetLayerContinuous(layer, continuous: true);
+        }
 
         if (layer is GroupLayer group)
         {
@@ -393,6 +402,7 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
                 Direction = tag.Direction.ToString(),
                 RepeatCount = tag.RepeatCount,
                 Color = tag.Color?.ToHex(),
+                CoversWholeTimeline = tag.CoversWholeTimeline,
             });
         }
 
@@ -447,6 +457,7 @@ public sealed class XpxelProjectSerializer : IImageImporter, IImageExporter
             Name = layer.Name,
             IsVisible = layer.IsVisible,
             IsLocked = layer.IsLocked,
+            IsContinuous = layer.IsContinuous,
             Opacity = layer.Opacity,
             BlendMode = layer.BlendMode.ToString(),
             TagColor = layer.TagColor?.ToHex(),

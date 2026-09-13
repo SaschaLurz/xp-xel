@@ -6,6 +6,8 @@ using XPXel.Core.Documents;
 using XPXel.Core.Editing;
 using XPXel.Core.History;
 using XPXel.Core.Imaging;
+using XPXel.Core.Primitives;
+using XPXel.Core.Rendering;
 
 namespace XPXel.UI.ViewModels;
 
@@ -47,6 +49,37 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     private bool _isRebuilding;
 
     /// <summary>
+    /// Guards the round trip between the panel's selection and the workspace's.
+    /// </summary>
+    /// <remarks>
+    /// The panel pushes its selection to the workspace and now also follows the workspace's,
+    /// because the timeline, an undo and a placed transform all change the active layer without
+    /// going anywhere near this panel. Both directions are real, so the pair is guarded rather
+    /// than one of them being argued away.
+    /// </remarks>
+    private bool _isFollowingWorkspace;
+
+    /// <summary>The other half of that guard: the panel is mid-way through telling the workspace.</summary>
+    /// <remarks>
+    /// The workspace raises its change events synchronously, so a push from this panel comes
+    /// straight back through <see cref="OnWorkspacePropertyChanged"/> before the push has
+    /// finished — at which point the workspace's active layer and its marked set disagree with
+    /// each other, and following that half-finished state undid the change being made. Marking
+    /// a second layer put the highlight back on the first, and a stroke then landed on both.
+    /// </remarks>
+    private bool _isPushingToWorkspace;
+
+    /// <summary>
+    /// The layers last copied, waiting to be pasted.
+    /// </summary>
+    /// <remarks>
+    /// Kept on the panel rather than on the system clipboard: a layer is an XP-xel idea that no
+    /// other program has a format for, and the panel is a single instance shared by every open
+    /// document, so a layer copied in one tab pastes into another.
+    /// </remarks>
+    private IReadOnlyList<LayerClip>? _layerClipboard;
+
+    /// <summary>
     /// Every highlighted row, the selected one included.
     /// </summary>
     /// <remarks>
@@ -58,14 +91,43 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     private readonly List<LayerItemViewModel> _markedRows = [];
 
     /// <summary>Initialises the panel.</summary>
-    public LayersViewModel()
+    /// <param name="settings">
+    /// The shared layer options, which the panel's own settings button edits.
+    /// </param>
+    public LayersViewModel(LayerSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        Settings = settings;
         _thumbnailTimer = new DispatcherTimer { Interval = ThumbnailRefreshDelay };
         _thumbnailTimer.Tick += OnThumbnailTimerTick;
     }
 
     [ObservableProperty]
     private LayerItemViewModel? _selectedLayer;
+
+    /// <summary>
+    /// How layers behave when artwork is placed on them, edited from the panel's own settings
+    /// button as well as from Settings ▸ Layers.
+    /// </summary>
+    /// <remarks>
+    /// Both, rather than one or the other. These change what happens when a transform or a
+    /// paste lands, which is a thing an artist wants to reach without leaving the panel they
+    /// are already looking at - and it is also a preference, which belongs where preferences
+    /// are kept. There is one object behind both, so they can never disagree.
+    /// </remarks>
+    public LayerSettings Settings { get; }
+
+    /// <summary>
+    /// Opens the full settings, supplied by the shell so the panel needs no knowledge of it.
+    /// </summary>
+    /// <remarks>
+    /// A view model in a docked panel cannot reach the shell - the shell owns it, not the
+    /// other way round - so the command is handed in rather than taken. It is null until the
+    /// shell is built, and the button that uses it is simply disabled until then.
+    /// </remarks>
+    [ObservableProperty]
+    private System.Windows.Input.ICommand? _openSettingsCommand;
 
     /// <summary>Every highlighted row: what a structural operation acts on.</summary>
     public IReadOnlyList<LayerItemViewModel> MarkedRows => _markedRows;
@@ -99,7 +161,10 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
             }
         }
 
-        _workspace?.SetSelectedLayers(_markedRows.Select(row => row.Layer));
+        if (!_isFollowingWorkspace)
+        {
+            PushToWorkspace(workspace => workspace.SetSelectedLayers(_markedRows.Select(row => row.Layer)));
+        }
 
         OnPropertyChanged(nameof(MarkedRows));
         OnPropertyChanged(nameof(HasMultipleMarkedRows));
@@ -148,6 +213,16 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     /// <param name="workspace">The document to present.</param>
     public void Attach(DocumentWorkspace? workspace)
     {
+        if (ReferenceEquals(_workspace, workspace))
+        {
+            return;
+        }
+
+        if (_workspace is not null)
+        {
+            _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
+        }
+
         if (_observedDocument is not null)
         {
             _observedDocument.Changed -= OnDocumentChanged;
@@ -155,6 +230,15 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
 
         _workspace = workspace;
         _observedDocument = workspace?.Document;
+
+        if (_workspace is not null)
+        {
+            // The document says when its layers change; the workspace says which frame and
+            // which layer are being worked on. The panel needs both, and used to hear only the
+            // first - so stepping to another frame left every preview showing the frame before
+            // it, and a layer made active from the timeline left the highlight behind.
+            _workspace.PropertyChanged += OnWorkspacePropertyChanged;
+        }
 
         if (_observedDocument is not null)
         {
@@ -169,6 +253,12 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     {
         _thumbnailTimer.Stop();
         _thumbnailTimer.Tick -= OnThumbnailTimerTick;
+
+        if (_workspace is not null)
+        {
+            _workspace.PropertyChanged -= OnWorkspacePropertyChanged;
+            _workspace = null;
+        }
 
         if (_observedDocument is not null)
         {
@@ -299,6 +389,317 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
             : new CompositeCommand("Delete Layers", removals));
 
         SelectedLayer = Layers.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Bakes every marked layer into one, flattening them exactly as the canvas draws them.
+    /// </summary>
+    /// <param name="row">
+    /// The row the gesture began on, or <see langword="null"/> for the marked set. A row
+    /// outside the marked set merges nothing, since one layer merged with itself is a no-op.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <b>Every frame, not only the one on screen.</b> Merging a walk cycle's layers on frame
+    /// four and leaving frames one to three unmerged would produce a document whose layer stack
+    /// changes as it plays, which is not a thing a document can be. So the flatten runs once per
+    /// frame and the result is one layer holding the whole animation.
+    /// </para>
+    /// <para>
+    /// <b>The result is a new layer rather than the bottom one overwritten.</b> A merge set can
+    /// include a folder or a text layer, neither of which can simply be handed a buffer of
+    /// pixels — and going through <see cref="AddLayerCommand"/> means the whole thing is undone
+    /// by putting the originals back rather than by trying to reconstruct them.
+    /// </para>
+    /// <para>
+    /// It flattens through <see cref="LayerCompositor.ComposeLayers"/>, the same code the canvas
+    /// draws with, so what lands is what the artist was looking at when they asked.
+    /// </para>
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanMergeLayers))]
+    private void MergeLayers(LayerItemViewModel? row)
+    {
+        if (_workspace is not { } workspace)
+        {
+            return;
+        }
+
+        List<LayerItemViewModel> targets = InDocumentOrder(GetTargets(row));
+
+        if (targets.Count < 2)
+        {
+            return;
+        }
+
+        PixelDocument document = workspace.Document;
+        List<LayerNode> layers = [.. targets.Select(t => t.Layer)];
+
+        // The bottom-most is where the result goes and whose name it takes, which is what
+        // every editor with a merge command does.
+        LayerNode bottom = layers[0];
+
+        if (bottom.Parent is not { } parent)
+        {
+            return;
+        }
+
+        int index = parent.IndexOf(bottom);
+        RasterLayer merged = new(Guid.NewGuid(), bottom.Name)
+        {
+            IsVisible = true,
+        };
+
+        List<Cel> cels = [];
+        LayerCompositor compositor = new();
+
+        foreach (Frame frame in document.Frames)
+        {
+            PixelBuffer flattened = new(document.Size);
+            compositor.ComposeLayers(document, frame, layers, flattened);
+
+            // A frame on which none of the merged layers painted anything gets no cel at all,
+            // which is how an empty cel is represented everywhere else in the document.
+            if (!flattened.GetOccupiedBounds().IsEmpty)
+            {
+                cels.Add(new Cel(merged.Id, frame.Id, flattened));
+            }
+        }
+
+        // The removals are built before anything moves, so each captures the position it will
+        // be put back into. They run first and the new layer lands in the gap they leave, which
+        // is why its index is the bottom-most layer's own: nothing merged sat below it.
+        List<IUndoableCommand> parts =
+            [.. targets.AsEnumerable().Reverse().Select(
+                t => new RemoveLayerCommand("Merge Layers", document, t.Layer))];
+
+        parts.Add(new AddLayerCommand("Merge Layers", document, merged, parent, index, cels));
+
+        workspace.History.Execute(new CompositeCommand("Merge Layers", parts));
+        SelectLayer(merged);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether there are at least two marked layers to merge.
+    /// </summary>
+    private bool CanMergeLayers() => _workspace is not null && _markedRows.Count > 1;
+
+    /// <summary>
+    /// Adds an opaque white layer at the bottom of the stack, on every frame.
+    /// </summary>
+    /// <remarks>
+    /// The thing an artist means by "give me a background". It is one drawing shared by the
+    /// whole timeline — see <see cref="LayerNode.IsContinuous"/> — so it is behind every frame
+    /// including the ones added afterwards, and painting on it from any frame changes all of
+    /// them. Doing this by hand meant a white layer per frame and no way to keep them in step.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasDocument))]
+    private void AddBackgroundLayer()
+    {
+        if (_workspace is not { } workspace)
+        {
+            return;
+        }
+
+        PixelDocument document = workspace.Document;
+
+        RasterLayer background = new(Guid.NewGuid(), NextBackgroundName(document));
+        PixelBuffer white = new(document.Size);
+        white.Fill(PixelColor.White);
+
+        Cel cel = new(background.Id, document.Frames[0].Id, white);
+
+        // Added first with an ordinary per-frame cel, then switched to being shared: two
+        // existing commands rather than a third one that would have to know both halves.
+        workspace.History.Execute(new CompositeCommand(
+            "Add Background",
+            [
+                new AddLayerCommand("Add Background", document, background, document.Root, 0, [cel]),
+                new SetLayerContinuousCommand(
+                    "Add Background", document, background, continuous: true, document.Frames[0]),
+            ]));
+
+        SelectLayer(background);
+    }
+
+    /// <summary>
+    /// Switches the marked layers between one drawing for the whole timeline and a drawing
+    /// per frame.
+    /// </summary>
+    /// <param name="row">The row the gesture began on, or <see langword="null"/> for the marked set.</param>
+    /// <remarks>
+    /// Turning it on has to choose which frame's drawing survives, and it keeps the one being
+    /// looked at. That is the only defensible answer and it is why the command is undoable in
+    /// one step: getting it wrong should cost one Ctrl+Z, not an evening.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void ToggleContinuous(LayerItemViewModel? row)
+    {
+        if (_workspace is not { } workspace || GetTargets(row) is not { Count: > 0 } targets)
+        {
+            return;
+        }
+
+        // The whole marked set follows whichever row was asked, so ticking it on one of five
+        // marked layers does not leave the other four disagreeing with the tick.
+        bool continuous = !(row ?? targets[0]).Layer.IsContinuous;
+        List<IUndoableCommand> parts = [];
+
+        foreach (LayerItemViewModel target in InDocumentOrder(targets))
+        {
+            SetLayerContinuousCommand command = new(
+                continuous ? "Same on Every Frame" : "One Drawing per Frame",
+                workspace.Document,
+                target.Layer,
+                continuous,
+                workspace.ActiveFrame);
+
+            if (command.HasChanges)
+            {
+                parts.Add(command);
+            }
+        }
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        workspace.History.Execute(parts.Count == 1
+            ? parts[0]
+            : new CompositeCommand(parts[0].Name, parts));
+    }
+
+    /// <summary>Copies this frame's drawing onto every other frame of the marked layers.</summary>
+    /// <param name="row">The row the gesture began on, or <see langword="null"/> for the marked set.</param>
+    /// <remarks>
+    /// Independent copies, unlike <see cref="ToggleContinuousCommand"/>: this is for spreading
+    /// a starting point that each frame will then be changed away from.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void CopyToAllFrames(LayerItemViewModel? row)
+    {
+        if (_workspace is not { } workspace || GetTargets(row) is not { Count: > 0 } targets)
+        {
+            return;
+        }
+
+        List<IUndoableCommand> parts = [];
+
+        foreach (LayerItemViewModel target in InDocumentOrder(targets))
+        {
+            CopyCelToAllFramesCommand command = new(
+                "Copy to All Frames", workspace.Document, target.Layer, workspace.ActiveFrame);
+
+            if (command.HasChanges)
+            {
+                parts.Add(command);
+            }
+        }
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        workspace.History.Execute(parts.Count == 1
+            ? parts[0]
+            : new CompositeCommand("Copy to All Frames", parts));
+    }
+
+    /// <summary>
+    /// Takes a copy of the marked layers, artwork on every frame included, for pasting later.
+    /// </summary>
+    /// <param name="row">The row the gesture began on, or <see langword="null"/> for the marked set.</param>
+    /// <remarks>
+    /// <b>Separate from Ctrl+C on purpose.</b> Copying pixels and copying a layer are different
+    /// things: one takes what is marked on the frame in front of you, the other takes the layer
+    /// itself — its name, its opacity, its blend mode and every frame's drawing. Ctrl+C has
+    /// always meant the first, and quietly making it sometimes mean the second would be worse
+    /// than having two commands.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(HasSelection))]
+    private void CopyLayer(LayerItemViewModel? row)
+    {
+        if (_workspace is not { } workspace || GetTargets(row) is not { Count: > 0 } targets)
+        {
+            return;
+        }
+
+        List<LayerClip> clips = [];
+
+        foreach (LayerItemViewModel target in InDocumentOrder(targets))
+        {
+            if (LayerClip.From(workspace.Document, target.Layer) is { } clip)
+            {
+                clips.Add(clip);
+            }
+        }
+
+        if (clips.Count > 0)
+        {
+            _layerClipboard = clips;
+            PasteLayerCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    /// <summary>Puts the copied layers back into the document, above the selected one.</summary>
+    /// <remarks>
+    /// Into <em>this</em> document, which may be a different one from the copy: the clip holds
+    /// artwork per frame position rather than per frame identity, so pasting a four-frame layer
+    /// into a two-frame document brings the first two and drops the rest instead of failing.
+    /// </remarks>
+    [RelayCommand(CanExecute = nameof(CanPasteLayer))]
+    private void PasteLayer()
+    {
+        if (_workspace is not { } workspace || _layerClipboard is not { Count: > 0 } clips)
+        {
+            return;
+        }
+
+        PixelDocument document = workspace.Document;
+        GroupLayer parent = SelectedLayer?.Layer.Parent ?? document.Root;
+        int index = SelectedLayer is null ? parent.Children.Count : parent.IndexOf(SelectedLayer.Layer) + 1;
+
+        List<IUndoableCommand> parts = [];
+        LayerNode? last = null;
+
+        foreach (LayerClip clip in clips)
+        {
+            (RasterLayer layer, List<Cel> cels, bool continuous) = clip.Rebuild(document);
+
+            parts.Add(new AddLayerCommand("Paste Layer", document, layer, parent, index, cels));
+
+            if (continuous)
+            {
+                parts.Add(new SetLayerContinuousCommand(
+                    "Paste Layer", document, layer, continuous: true, document.Frames[0]));
+            }
+
+            last = layer;
+            index++;
+        }
+
+        if (parts.Count == 0)
+        {
+            return;
+        }
+
+        workspace.History.Execute(new CompositeCommand("Paste Layer", parts));
+
+        if (last is not null)
+        {
+            SelectLayer(last);
+        }
+    }
+
+    /// <summary>Gets a value indicating whether a layer has been copied.</summary>
+    private bool CanPasteLayer() => _workspace is not null && _layerClipboard is { Count: > 0 };
+
+    /// <summary>Produces "Background 2" style names, counting only the backgrounds.</summary>
+    private static string NextBackgroundName(PixelDocument document)
+    {
+        int count = document.EnumerateLayers().Count(l => l.Name.StartsWith("Background", StringComparison.Ordinal));
+        return count == 0 ? "Background" : $"Background {count + 1}";
     }
 
     /// <summary>Adds an empty folder above the selected layer and selects it.</summary>
@@ -449,6 +850,90 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         SelectLayer(layer);
     }
 
+    /// <summary>
+    /// Follows the workspace: which frame is being drawn on, and which layers are marked.
+    /// </summary>
+    private void OnWorkspacePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (_isPushingToWorkspace)
+        {
+            return;
+        }
+
+        switch (e.PropertyName)
+        {
+            // A preview shows one layer on one frame, so stepping along the timeline changes
+            // every one of them. Rendered at once rather than through the throttle: the delay
+            // exists to coalesce a burst of pixel changes during a stroke, and a frame change
+            // is a single event that the artist is looking straight at.
+            case nameof(DocumentWorkspace.ActiveFrame):
+                RefreshThumbnails();
+                break;
+
+            case nameof(DocumentWorkspace.ActiveLayer):
+            case nameof(DocumentWorkspace.SelectedLayers):
+                FollowWorkspaceSelection();
+                RefreshActiveRow();
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Moves the panel's highlight onto whatever the workspace now says is selected.
+    /// </summary>
+    /// <remarks>
+    /// The active layer is changed from outside this panel more often than in it: clicking a
+    /// cell in the timeline, undoing the addition of a layer, and placing a transform that made
+    /// a layer of its own all do it. Without this the panel went on highlighting the previous
+    /// row while every tool wrote somewhere else.
+    /// </remarks>
+    private void FollowWorkspaceSelection()
+    {
+        if (_isFollowingWorkspace || _isRebuilding || _workspace is not { } workspace)
+        {
+            return;
+        }
+
+        List<LayerItemViewModel> marked =
+            [.. Layers.Where(row => workspace.SelectedLayers.Contains(row.Layer))];
+
+        LayerItemViewModel? active = Layers.FirstOrDefault(row => row.Layer == workspace.ActiveLayer);
+
+        if (active is null && marked.Count == 0)
+        {
+            return;
+        }
+
+        bool sameMarks = marked.Count == _markedRows.Count && marked.All(_markedRows.Contains);
+
+        if (sameMarks && ReferenceEquals(active, SelectedLayer))
+        {
+            return;
+        }
+
+        _isFollowingWorkspace = true;
+
+        try
+        {
+            if (active is not null)
+            {
+                SelectedLayer = active;
+            }
+
+            if (!sameMarks && marked.Count > 0)
+            {
+                SetMarkedRows(marked);
+            }
+        }
+        finally
+        {
+            _isFollowingWorkspace = false;
+        }
+    }
+
     private void OnDocumentChanged(object? sender, DocumentChangedEventArgs e)
     {
         if (e.Kind == DocumentChangeKind.Structure)
@@ -457,7 +942,10 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (e.Kind == DocumentChangeKind.Pixels)
+        // Pixels for the obvious reason, and properties because a preview of a folder is a
+        // composite of what is inside it: ticking a child hidden changes the folder's picture
+        // without a single pixel being written.
+        if (e.Kind is DocumentChangeKind.Pixels or DocumentChangeKind.Properties)
         {
             ScheduleThumbnailRefresh();
         }
@@ -606,6 +1094,8 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         ApplySelectionToWorkspace();
         NotifyCommandsCanExecuteChanged();
 
+        RefreshActiveRow();
+
         // New rows start with no preview, so render immediately rather than waiting for the
         // throttle: an empty box beside a layer reads as "this layer is empty".
         RefreshThumbnails();
@@ -617,7 +1107,16 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
         for (int i = group.Children.Count - 1; i >= 0; i--)
         {
             LayerNode child = group.Children[i];
-            Layers.Add(new LayerItemViewModel(child, history, depth) { Peers = GetPeerLayers });
+            Layers.Add(new LayerItemViewModel(child, history, depth)
+            {
+                Peers = GetPeerLayers,
+                DeleteCommand = DeleteLayerCommand,
+                MergeCommand = MergeLayersCommand,
+                ContinuousCommand = ToggleContinuousCommand,
+                CopyToAllFramesCommand = CopyToAllFramesCommand,
+                CopyLayerCommand = CopyLayerCommand,
+                PasteLayerCommand = PasteLayerCommand,
+            });
 
             if (child is GroupLayer nested)
             {
@@ -663,9 +1162,45 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
 
     private void ApplySelectionToWorkspace()
     {
-        if (_workspace is { } workspace)
+        PushToWorkspace(workspace => workspace.ActiveLayer = SelectedLayer?.Layer);
+        RefreshActiveRow();
+    }
+
+    /// <summary>Moves the "tools are pointed here" bar onto the active layer's row.</summary>
+    private void RefreshActiveRow()
+    {
+        LayerNode? active = _workspace?.ActiveLayer;
+
+        foreach (LayerItemViewModel row in Layers)
         {
-            workspace.ActiveLayer = SelectedLayer?.Layer;
+            row.IsActive = ReferenceEquals(row.Layer, active);
+        }
+    }
+
+    /// <summary>
+    /// Tells the workspace something, without hearing it come back around.
+    /// </summary>
+    /// <remarks>
+    /// See <see cref="_isPushingToWorkspace"/>: the workspace's events are synchronous, so
+    /// every push would otherwise be answered mid-flight by a state that is only half updated.
+    /// </remarks>
+    private void PushToWorkspace(Action<DocumentWorkspace> push)
+    {
+        if (_workspace is not { } workspace)
+        {
+            return;
+        }
+
+        bool wasPushing = _isPushingToWorkspace;
+        _isPushingToWorkspace = true;
+
+        try
+        {
+            push(workspace);
+        }
+        finally
+        {
+            _isPushingToWorkspace = wasPushing;
         }
     }
 
@@ -673,6 +1208,14 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     {
         if (_isRebuilding)
         {
+            return;
+        }
+
+        if (_isFollowingWorkspace)
+        {
+            // The workspace is the one talking. Highlighting the row is the whole job; pushing
+            // it straight back would be an echo.
+            NotifyCommandsCanExecuteChanged();
             return;
         }
 
@@ -702,6 +1245,12 @@ public sealed partial class LayersViewModel : ViewModelBase, IDisposable
     {
         AddLayerCommand.NotifyCanExecuteChanged();
         AddFolderCommand.NotifyCanExecuteChanged();
+        AddBackgroundLayerCommand.NotifyCanExecuteChanged();
+        MergeLayersCommand.NotifyCanExecuteChanged();
+        ToggleContinuousCommand.NotifyCanExecuteChanged();
+        CopyToAllFramesCommand.NotifyCanExecuteChanged();
+        CopyLayerCommand.NotifyCanExecuteChanged();
+        PasteLayerCommand.NotifyCanExecuteChanged();
         GroupIntoFolderCommand.NotifyCanExecuteChanged();
         DuplicateLayerCommand.NotifyCanExecuteChanged();
         DeleteLayerCommand.NotifyCanExecuteChanged();

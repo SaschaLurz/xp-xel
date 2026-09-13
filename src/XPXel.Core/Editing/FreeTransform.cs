@@ -13,6 +13,18 @@ public enum FreeTransformScope
 
     /// <summary>The marching ants alone, leaving the artwork exactly where it is.</summary>
     Marks,
+
+    /// <summary>
+    /// Pixels arriving from the clipboard, floating over the document until they are placed.
+    /// </summary>
+    /// <remarks>
+    /// The same box, the same eight handles and the same Enter and Escape as a transform of the
+    /// artwork, because a paste wants every one of them: what arrives is almost never the right
+    /// size or in the right place, and asking the artist to place it first and resize it as a
+    /// second, separately undoable act is asking them to do the job twice. The only difference
+    /// is that nothing is lifted, so no hole is left behind.
+    /// </remarks>
+    Clip,
 }
 
 /// <summary>
@@ -20,8 +32,9 @@ public enum FreeTransformScope
 /// </summary>
 /// <remarks>
 /// The same shape as <see cref="Tools.CropGrip"/> and for the same reason: the canvas asks on
-/// every pointer move so the pointer can promise what a press will do. The edges combine, and
-/// <see cref="Inside"/> is the body of the box, which moves the whole thing.
+/// every pointer move so the pointer can promise what a press will do. The edges combine,
+/// <see cref="Inside"/> is the body of the box, and <see cref="Center"/> is the handle in the
+/// middle of it — which both move the whole thing.
 /// </remarks>
 [Flags]
 public enum TransformGrip
@@ -43,18 +56,31 @@ public enum TransformGrip
 
     /// <summary>The body of the box, which moves it.</summary>
     Inside = 16,
+
+    /// <summary>
+    /// The handle in the middle of the box, which moves it and outranks every edge.
+    /// </summary>
+    /// <remarks>
+    /// It exists because of small artwork. The eight resize handles need a few pixels of slack
+    /// around them to be aimed at with a mouse, and on a sprite twenty pixels across that slack
+    /// covers the whole box — so every press grabbed an edge and there was no way left to
+    /// simply move the thing. A dedicated handle in the middle, tested before anything else,
+    /// means there is always somewhere to take hold of the artwork itself.
+    /// </remarks>
+    Center = 32,
 }
 
 /// <summary>
 /// A free transform: a box around whatever is being changed, eight handles to scale it with,
-/// flips, quarter turns, and one undo entry for the lot.
+/// a handle in the middle to move it by, flips, quarter turns, and one undo entry for the lot.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>What it acts on, in order.</b> Marked pixels if anything is marked; otherwise everything
 /// painted on the marked layers. That is the same "what do you mean by <em>this</em>" rule the
 /// move tool follows, and it is what makes Ctrl+T do the obvious thing without a dialog asking
-/// which of the two was meant.
+/// which of the two was meant. A paste (<see cref="FreeTransformScope.Clip"/>) skips the
+/// question entirely: what it acts on came from the clipboard.
 /// </para>
 /// <para>
 /// <b>Nearest neighbour, and no arbitrary angles.</b> Scaling picks the nearest source pixel and
@@ -77,19 +103,43 @@ public enum TransformGrip
 /// their mind.
 /// </para>
 /// <para>
+/// <b>Placing it is a separate pass, and that is deliberate.</b> <see cref="Commit"/> throws the
+/// live preview away, putting every layer back exactly as the box found it, and only then works
+/// out where the artwork is going. Two things depend on that. It can look at what is underneath
+/// the destination and decide the result deserves a layer of its own; and it can grow a cel
+/// before writing to it, so artwork dragged over the canvas edge is kept rather than clipped
+/// away — the same promise moving a layer has always made, which a transform used to break.
+/// </para>
+/// <para>
 /// <b><see cref="FreeTransformScope.Marks"/> touches no pixels at all.</b> It resamples the
 /// selection mask and nothing else, which is how an artist reshapes a marquee they have already
 /// drawn: mark a shape, transform the marks into a bigger one, then fill it. The artwork
-/// underneath is untouched throughout.
+/// underneath is untouched throughout, and it is the one scope that ends with something marked
+/// — for every other, placing the artwork clears the marks, because the marks were the question
+/// and the placed pixels are the answer.
 /// </para>
 /// </remarks>
 public sealed class FreeTransform
 {
+    /// <summary>
+    /// How near a handle a press has to land to take hold of it, in screen pixels.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately close to half the drawn handle, so that what looks grabbable is what is
+    /// grabbable. The box used to be resizable anywhere along an edge with seven pixels of
+    /// slack in both directions, which on anything small meant the artist could not reach the
+    /// artwork at all without catching an edge on the way.
+    /// </remarks>
+    public const double GripScreenDistance = 5.0;
+
     /// <summary>What the Edit menu calls a transform of the artwork.</summary>
     private const string PixelsActionName = "Transform";
 
     /// <summary>What it calls a transform of the marching ants.</summary>
     private const string MarksActionName = "Transform Selection";
+
+    /// <summary>What it calls placing a paste.</summary>
+    private const string PasteActionName = "Paste";
 
     private readonly DocumentWorkspace _workspace;
 
@@ -104,6 +154,24 @@ public sealed class FreeTransform
 
     /// <summary>The marquee to put back on undo, or on Escape.</summary>
     private readonly SelectionMask? _selectionBefore;
+
+    /// <summary>
+    /// Whether the artwork was taken off a layer, and so leaves a hole where it came from.
+    /// </summary>
+    /// <remarks>
+    /// False for a paste: the pixels came from the clipboard, and clearing the region under
+    /// them would punch a hole in artwork the artist never asked to change.
+    /// </remarks>
+    private readonly bool _leavesAHole;
+
+    /// <summary>Whether the result always lands on a layer of its own.</summary>
+    private readonly bool _alwaysOwnLayer;
+
+    /// <summary>
+    /// Whether the result lands on a layer of its own when it would otherwise cover artwork
+    /// that is already there.
+    /// </summary>
+    private readonly bool _ownLayerWhenCovering;
 
     private ImageRect _bounds;
     private bool _flipX;
@@ -121,18 +189,25 @@ public sealed class FreeTransform
         ImageRect source,
         byte[] coverage,
         SelectionMask? selectionBefore,
-        FreeTransformScope scope)
+        FreeTransformScope scope,
+        bool leavesAHole,
+        bool alwaysOwnLayer,
+        bool ownLayerWhenCovering,
+        string actionName)
     {
         _workspace = workspace;
         _subjects = subjects;
         _source = source;
         _coverage = coverage;
         _selectionBefore = selectionBefore;
+        _leavesAHole = leavesAHole;
+        _alwaysOwnLayer = alwaysOwnLayer;
+        _ownLayerWhenCovering = ownLayerWhenCovering;
         _bounds = source;
         _dragBounds = source;
 
         Scope = scope;
-        ActionName = scope == FreeTransformScope.Marks ? MarksActionName : PixelsActionName;
+        ActionName = actionName;
     }
 
     /// <summary>What this transform is acting on.</summary>
@@ -183,7 +258,7 @@ public sealed class FreeTransform
             return selection is null ? null : BeginMarks(workspace, selection);
         }
 
-        List<Cel> cels = [];
+        List<(RasterLayer Layer, Cel Cel)> targets = [];
 
         foreach (LayerNode leaf in workspace.GetSelectedLeaves())
         {
@@ -198,18 +273,18 @@ public sealed class FreeTransform
 
             if (workspace.Document.Cels.Find(layer.Id, workspace.ActiveFrame.Id) is { } cel)
             {
-                cels.Add(cel);
+                targets.Add((layer, cel));
             }
         }
 
-        if (cels.Count == 0)
+        if (targets.Count == 0)
         {
             return null;
         }
 
         ImageRect source = selection is not null
             ? selection.Bounds.Intersect(workspace.Document.Bounds)
-            : MeasurePaintedBounds(cels, workspace.Document.Bounds);
+            : MeasurePaintedBounds(targets, workspace.Document.Bounds);
 
         if (source.Width <= 0 || source.Height <= 0)
         {
@@ -219,7 +294,7 @@ public sealed class FreeTransform
         byte[] coverage = BuildCoverage(selection, source);
         List<Subject> subjects = [];
 
-        foreach (Cel cel in cels)
+        foreach ((RasterLayer layer, Cel cel) in targets)
         {
             PixelColor[] lifted = new PixelColor[source.Width * source.Height];
 
@@ -237,6 +312,8 @@ public sealed class FreeTransform
             // not pass one: a transform's whole business is writing where the artwork is going,
             // which is somewhere it is not yet marked.
             subjects.Add(new Subject(
+                layer,
+                cel,
                 RasterEditSession.Begin(workspace.Document, cel, PixelsActionName),
                 lifted));
         }
@@ -247,7 +324,76 @@ public sealed class FreeTransform
             source,
             coverage,
             selection?.Clone(),
-            FreeTransformScope.Pixels);
+            FreeTransformScope.Pixels,
+            leavesAHole: true,
+            alwaysOwnLayer: false,
+            ownLayerWhenCovering: workspace.LayerSettings.TransformToNewLayer,
+            PixelsActionName);
+    }
+
+    /// <summary>Floats a clip over the active layer inside a transform box, ready to be placed.</summary>
+    /// <param name="workspace">The document to paste into.</param>
+    /// <param name="clip">The pixels to paste.</param>
+    /// <param name="origin">Where the clip's top-left corner should land.</param>
+    /// <returns>
+    /// The transform, or <see langword="null"/> when there is nothing to paste into — a locked
+    /// or hidden layer, or one that is not a drawing layer — or nothing worth pasting.
+    /// </returns>
+    /// <remarks>
+    /// The pixels are stamped down straight away rather than on the first drag, so the artist
+    /// sees what arrived and where. It is still floating at that point: dragging it, resizing
+    /// it, nudging it or pressing Escape all work, and nothing reaches the history until it is
+    /// placed.
+    /// </remarks>
+    /// <param name="fromOutside">
+    /// Whether the pixels came from another program rather than from XP-xel itself, which is
+    /// what decides whether they are given a layer of their own.
+    /// </param>
+    public static FreeTransform? BeginPaste(
+        DocumentWorkspace workspace,
+        PixelClip clip,
+        ImagePoint origin,
+        bool fromOutside = false)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(clip);
+
+        if (clip.IsEmpty
+            || workspace.ActiveRasterLayer is not { } layer
+            || workspace.GetOrCreateActiveCel() is not { } cel)
+        {
+            return null;
+        }
+
+        ImageRect source = new(origin.X, origin.Y, clip.Size.Width, clip.Size.Height);
+
+        FreeTransform transform = new(
+            workspace,
+            [new Subject(
+                layer,
+                cel,
+                RasterEditSession.Begin(workspace.Document, cel, PasteActionName),
+                clip.Pixels.ToArray())],
+            source,
+            clip.Coverage.ToArray(),
+            workspace.Selection?.Clone(),
+            FreeTransformScope.Clip,
+            leavesAHole: false,
+
+            // One option governs a paste, not two. Someone who has turned "paste to a new
+            // layer" off has said where they want pasted pixels to go, and second-guessing
+            // that whenever the destination happens to be occupied would make the setting
+            // mean "sometimes".
+            //
+            // And only artwork from another program: pixels copied inside XP-xel go where the
+            // artist put them. A new layer per paste is what turned "put this background on
+            // each frame" into a stack of layers nobody asked for.
+            alwaysOwnLayer: fromOutside && workspace.LayerSettings.PasteToNewLayer,
+            ownLayerWhenCovering: false,
+            PasteActionName);
+
+        transform.Render();
+        return transform;
     }
 
     /// <summary>Starts a transform of the marching ants alone.</summary>
@@ -261,7 +407,11 @@ public sealed class FreeTransform
             source,
             BuildCoverage(selection, source),
             selection.Clone(),
-            FreeTransformScope.Marks);
+            FreeTransformScope.Marks,
+            leavesAHole: false,
+            alwaysOwnLayer: false,
+            ownLayerWhenCovering: false,
+            MarksActionName);
     }
 
     /// <summary>A short description of the current state, for the status bar.</summary>
@@ -284,41 +434,63 @@ public sealed class FreeTransform
     /// Reports what a point is over, so the pointer can say what a press would take hold of.
     /// </summary>
     /// <param name="point">The point, in image coordinates.</param>
-    /// <param name="tolerance">How near an edge still counts as being on it, in image pixels.</param>
+    /// <param name="tolerance">How near a handle still counts as being on it, in image pixels.</param>
     /// <returns>The grip a press there would take.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>The handles are points, not whole edges.</b> The eight squares the canvas draws are
+    /// the eight places the box resizes from, and nowhere else — which is what makes the
+    /// promise the pointer shape is already making a true one. Anywhere else inside the box
+    /// moves it.
+    /// </para>
+    /// <para>
+    /// <b>The middle wins.</b> The centre handle is tested first and its reach is held to a
+    /// quarter of the box, so it can never be the only thing a small box offers, and the eight
+    /// resize handles can never crowd out the one gesture that moves the artwork.
+    /// </para>
+    /// </remarks>
     public TransformGrip HitTest(ImagePoint point, int tolerance)
     {
         tolerance = Math.Max(1, tolerance);
 
-        bool nearLeft = Math.Abs(point.X - _bounds.Left) <= tolerance;
-        bool nearRight = Math.Abs(point.X - _bounds.Right) <= tolerance;
-        bool nearTop = Math.Abs(point.Y - _bounds.Top) <= tolerance;
-        bool nearBottom = Math.Abs(point.Y - _bounds.Bottom) <= tolerance;
+        int centreX = _bounds.Left + (_bounds.Width / 2);
+        int centreY = _bounds.Top + (_bounds.Height / 2);
+        int reach = Math.Clamp(tolerance, 1, Math.Max(1, Math.Min(_bounds.Width, _bounds.Height) / 4));
 
-        bool withinRows = point.Y >= _bounds.Top - tolerance && point.Y <= _bounds.Bottom + tolerance;
-        bool withinColumns = point.X >= _bounds.Left - tolerance && point.X <= _bounds.Right + tolerance;
-
-        TransformGrip grip = TransformGrip.None;
-
-        if (nearLeft && withinRows)
+        if (Math.Abs(point.X - centreX) <= reach && Math.Abs(point.Y - centreY) <= reach)
         {
-            grip |= TransformGrip.Left;
-        }
-        else if (nearRight && withinRows)
-        {
-            grip |= TransformGrip.Right;
+            return TransformGrip.Center;
         }
 
-        if (nearTop && withinColumns)
+        bool onLeft = Math.Abs(point.X - _bounds.Left) <= tolerance;
+        bool onRight = Math.Abs(point.X - _bounds.Right) <= tolerance;
+        bool onMiddleColumn = Math.Abs(point.X - centreX) <= tolerance;
+
+        bool onTop = Math.Abs(point.Y - _bounds.Top) <= tolerance;
+        bool onBottom = Math.Abs(point.Y - _bounds.Bottom) <= tolerance;
+        bool onMiddleRow = Math.Abs(point.Y - centreY) <= tolerance;
+
+        TransformGrip horizontal = onLeft ? TransformGrip.Left : onRight ? TransformGrip.Right : TransformGrip.None;
+        TransformGrip vertical = onTop ? TransformGrip.Top : onBottom ? TransformGrip.Bottom : TransformGrip.None;
+
+        // A corner handle is both edges at once; an edge handle is one edge and the middle of
+        // the other axis, which is exactly where the four edge squares are drawn.
+        if (horizontal != TransformGrip.None && vertical != TransformGrip.None)
         {
-            grip |= TransformGrip.Top;
-        }
-        else if (nearBottom && withinColumns)
-        {
-            grip |= TransformGrip.Bottom;
+            return horizontal | vertical;
         }
 
-        return grip != TransformGrip.None || !_bounds.Contains(point) ? grip : TransformGrip.Inside;
+        if (horizontal != TransformGrip.None && onMiddleRow)
+        {
+            return horizontal;
+        }
+
+        if (vertical != TransformGrip.None && onMiddleColumn)
+        {
+            return vertical;
+        }
+
+        return _bounds.Contains(point) ? TransformGrip.Inside : TransformGrip.None;
     }
 
     /// <summary>
@@ -455,28 +627,49 @@ public sealed class FreeTransform
             return marks;
         }
 
-        List<IUndoableCommand> parts = [];
-
+        // The live preview is thrown away first, putting every layer back exactly as the box
+        // found it. Everything below then works from the artwork as it really is: what the
+        // destination would cover, and how much bigger a cel has to be to hold what is going
+        // over the canvas edge. See the type remarks.
         foreach (Subject subject in _subjects)
         {
-            if (subject.Session.Commit() is { } command)
+            subject.Session.Rollback();
+        }
+
+        List<IUndoableCommand> parts = [];
+
+        // A transform of the artwork that was never adjusted has nothing to place. A paste
+        // always has: the pixels arrived from outside the document and have to be written down
+        // even if the artist accepted where they landed.
+        if (Scope == FreeTransformScope.Clip || HasChanges)
+        {
+            foreach (Subject subject in _subjects)
             {
-                parts.Add(command);
+                Place(subject, parts);
             }
         }
 
-        if (parts.Count == 0)
+        // Placing the artwork answers whatever the marks were asking, so they go. This is what
+        // makes Enter mean "done" rather than leaving the artist to press Escape or Ctrl+D
+        // afterwards to get a clean canvas back.
+        //
+        // Only once something has actually been placed, though. A box put up and taken down
+        // again without a drag has answered nothing, and this is reached defensively from
+        // several places — switching tool, switching tab — where silently throwing the marks
+        // away would be a change nobody asked for.
+        if (parts.Count > 0 && (_selectionBefore is not null || _workspace.Selection is not null))
         {
-            return null;
+            SetSelectionCommand deselect = new(_workspace, _selectionBefore, null, ActionName);
+            deselect.Redo();
+            parts.Add(deselect);
         }
 
-        // The marquee follows the artwork, so a transform can be followed by another one and so
-        // an undo does not strand the ants over the space the artwork used to fill.
-        SetSelectionCommand marquee = new(_workspace, _selectionBefore, BuildMask(), ActionName);
-        marquee.Redo();
-        parts.Add(marquee);
-
-        return new CompositeCommand(ActionName, parts);
+        return parts.Count switch
+        {
+            0 => null,
+            1 => parts[0],
+            _ => new CompositeCommand(ActionName, parts),
+        };
     }
 
     /// <summary>Abandons the transform, putting everything back as it was found.</summary>
@@ -493,7 +686,190 @@ public sealed class FreeTransform
         }
     }
 
+    /// <summary>
+    /// Writes one subject's artwork where the box has put it, growing or adding whatever has to
+    /// exist first, and records every step in <paramref name="parts"/>.
+    /// </summary>
+    /// <remarks>
+    /// The order the parts go in is the order redo replays them and the reverse of the order
+    /// undo unwinds them, so a cel has to be swapped in before the edits recorded against it
+    /// and a layer added before its cel is touched.
+    /// </remarks>
+    private void Place(Subject subject, List<IUndoableCommand> parts)
+    {
+        PixelDocument document = _workspace.Document;
+
+        if (!_alwaysOwnLayer && !(_ownLayerWhenCovering && WouldCoverArtwork(subject)))
+        {
+            // Straight back onto the layer it came from: clear the space it is leaving and
+            // stamp it where it has been put, in one session so it is one history entry.
+            Cel cel = Expand(subject.Cel, parts);
+            RasterEditSession session = RasterEditSession.Begin(document, cel, ActionName);
+
+            ClearSource(session);
+            Stamp(session, subject);
+
+            if (session.Commit() is { } edit)
+            {
+                parts.Add(edit);
+            }
+
+            return;
+        }
+
+        // A layer of its own. The hole still belongs to the layer the artwork was lifted off,
+        // because the artwork has moved rather than been copied.
+        if (_leavesAHole)
+        {
+            RasterEditSession vacate = RasterEditSession.Begin(document, subject.Cel, ActionName);
+            ClearSource(vacate);
+
+            if (vacate.Commit() is { } cleared)
+            {
+                parts.Add(cleared);
+            }
+        }
+
+        GroupLayer parent = subject.Layer.Parent ?? document.Root;
+        int index = parent.IndexOf(subject.Layer) + 1;
+
+        // The new layer wears the old one's opacity and blend mode, so the artwork looks the
+        // same the instant it is placed as it did a moment earlier under the transform box.
+        // Anything else would make Enter appear to change the colours.
+        RasterLayer layer = new(Guid.NewGuid(), NextLayerName(document))
+        {
+            Opacity = subject.Layer.Opacity,
+            BlendMode = subject.Layer.BlendMode,
+        };
+
+        document.InsertLayer(layer, parent, index);
+        parts.Add(new AddLayerCommand(ActionName, document, layer, parent, index));
+
+        Cel fresh = Expand(document.GetOrCreateCel(layer, _workspace.ActiveFrame), parts);
+        RasterEditSession paint = RasterEditSession.Begin(document, fresh, ActionName);
+
+        Stamp(paint, subject);
+
+        if (paint.Commit() is { } painted)
+        {
+            parts.Add(painted);
+        }
+
+        // The new layer is where the artist's next stroke should land: it is the one holding
+        // what they have just been looking at for the length of the drag.
+        _workspace.ActiveLayer = layer;
+        _workspace.SetSelectedLayers([layer]);
+    }
+
+    /// <summary>
+    /// Makes a cel big enough for wherever the box has ended up, recording the swap if one was
+    /// needed.
+    /// </summary>
+    /// <returns>The cel to write to, which is the original one when it was already big enough.</returns>
+    private Cel Expand(Cel cel, List<IUndoableCommand> parts)
+    {
+        Cel grown = cel.CreateExpanded(_bounds, _workspace.Document.Bounds);
+
+        if (ReferenceEquals(grown, cel))
+        {
+            return cel;
+        }
+
+        _workspace.Document.Cels.Set(grown);
+        parts.Add(new ReplaceCelCommand(ActionName, _workspace.Document, cel, grown));
+
+        return grown;
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether placing this subject where the box now sits would write
+    /// over artwork that is already on the layer.
+    /// </summary>
+    /// <remarks>
+    /// The space the artwork is vacating does not count — that is the artwork's own, and it is
+    /// about to be cleared — and neither does a transparent pixel in either image, since
+    /// nothing is destroyed by laying nothing on top of nothing. What is left is exactly the
+    /// case the artist would lose work to: a solid pixel landing on a solid pixel that has
+    /// nothing to do with it.
+    /// </remarks>
+    private bool WouldCoverArtwork(Subject subject)
+    {
+        for (int ty = _bounds.Top; ty < _bounds.Bottom; ty++)
+        {
+            for (int tx = _bounds.Left; tx < _bounds.Right; tx++)
+            {
+                if (MapToSource(tx, ty) is not { } index
+                    || _coverage[index] == 0
+                    || subject.Pixels[index].A == 0
+                    || IsWithinSource(tx, ty))
+                {
+                    continue;
+                }
+
+                if (subject.Cel.Pixels.GetPixelOrTransparent(
+                    tx - subject.Cel.Offset.X,
+                    ty - subject.Cel.Offset.Y).A > 0)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Whether a document point is one of the pixels this transform took part of.</summary>
+    private bool IsWithinSource(int x, int y) =>
+        _leavesAHole
+        && _source.Contains(x, y)
+        && _coverage[((y - _source.Top) * _source.Width) + (x - _source.Left)] > 0;
+
+    /// <summary>Clears the space the artwork was lifted from, if it was lifted from anywhere.</summary>
+    private void ClearSource(RasterEditSession session)
+    {
+        if (!_leavesAHole)
+        {
+            return;
+        }
+
+        for (int y = 0; y < _source.Height; y++)
+        {
+            for (int x = 0; x < _source.Width; x++)
+            {
+                if (_coverage[(y * _source.Width) + x] > 0)
+                {
+                    session.SetPixel(_source.Left + x, _source.Top + y, PixelColor.Transparent);
+                }
+            }
+        }
+    }
+
+    /// <summary>Writes the artwork wherever the box now sits.</summary>
+    private void Stamp(RasterEditSession session, Subject subject)
+    {
+        for (int ty = _bounds.Top; ty < _bounds.Bottom; ty++)
+        {
+            for (int tx = _bounds.Left; tx < _bounds.Right; tx++)
+            {
+                if (MapToSource(tx, ty) is { } index && _coverage[index] > 0)
+                {
+                    session.SetPixel(tx, ty, subject.Pixels[index]);
+                }
+            }
+        }
+    }
+
+    /// <summary>Produces "Layer 3" style names, the same way the layers panel does.</summary>
+    private static string NextLayerName(PixelDocument document) =>
+        $"Layer {document.EnumerateLayers().Count() + 1}";
+
     /// <summary>Redraws the artwork, or the marquee, at the current box.</summary>
+    /// <remarks>
+    /// This is the preview and only the preview. It writes into the cels as they already are,
+    /// so anything past a cel's edge simply does not appear — which is correct, because nothing
+    /// past the canvas edge is drawn either. <see cref="Commit"/> is where the artwork is
+    /// actually placed, and where the room for it is made.
+    /// </remarks>
     private void Render()
     {
         if (Scope == FreeTransformScope.Marks)
@@ -511,7 +887,10 @@ public sealed class FreeTransform
             subject.Session.ResetToOriginal();
         }
 
-        if (!HasChanges)
+        // Lifted artwork dragged back where it started is home, and the reset has already put
+        // it there. A paste has no such home: at its starting box it is still the thing that
+        // has to be stamped.
+        if (_leavesAHole && !HasChanges)
         {
             foreach (Subject subject in _subjects)
             {
@@ -523,30 +902,8 @@ public sealed class FreeTransform
 
         foreach (Subject subject in _subjects)
         {
-            for (int y = 0; y < _source.Height; y++)
-            {
-                for (int x = 0; x < _source.Width; x++)
-                {
-                    if (_coverage[(y * _source.Width) + x] > 0)
-                    {
-                        subject.Session.SetPixel(_source.Left + x, _source.Top + y, PixelColor.Transparent);
-                    }
-                }
-            }
-
-            for (int ty = _bounds.Top; ty < _bounds.Bottom; ty++)
-            {
-                for (int tx = _bounds.Left; tx < _bounds.Right; tx++)
-                {
-                    if (MapToSource(tx, ty) is not { } index || _coverage[index] == 0)
-                    {
-                        continue;
-                    }
-
-                    subject.Session.SetPixel(tx, ty, subject.Pixels[index]);
-                }
-            }
-
+            ClearSource(subject.Session);
+            Stamp(subject.Session, subject);
             subject.Session.PublishInterimChanges();
         }
     }
@@ -606,8 +963,8 @@ public sealed class FreeTransform
             {
                 if (MapToSource(x, y) is { } index && _coverage[index] > 0)
                 {
-                    // Anything pushed off the canvas is simply dropped, which matches what
-                    // happened to the pixels: the session could not write them either.
+                    // Anything pushed off the canvas is simply dropped: a mask has no room for
+                    // pixels the canvas does not have.
                     mask.SetCoverage(x, y, _coverage[index]);
                 }
             }
@@ -648,18 +1005,18 @@ public sealed class FreeTransform
     }
 
     /// <summary>
-    /// The smallest rectangle holding every painted pixel of the given cels.
+    /// The smallest rectangle holding every painted pixel of the given layers.
     /// </summary>
     /// <remarks>
     /// The painted pixels rather than the cel rectangles, so that the handles hug the sprite. A
     /// cel is usually the size of the whole canvas, and a transform box around the whole canvas
     /// would be a box with nothing to say about where the artwork actually is.
     /// </remarks>
-    private static ImageRect MeasurePaintedBounds(List<Cel> cels, ImageRect canvas)
+    private static ImageRect MeasurePaintedBounds(List<(RasterLayer Layer, Cel Cel)> targets, ImageRect canvas)
     {
         ImageRect painted = ImageRect.Empty;
 
-        foreach (Cel cel in cels)
+        foreach ((_, Cel cel) in targets)
         {
             ImageRect visible = cel.Bounds.Intersect(canvas);
 
@@ -678,8 +1035,10 @@ public sealed class FreeTransform
         return painted;
     }
 
-    /// <summary>One layer taking part in a transform: its edit session and its lifted pixels.</summary>
-    /// <param name="Session">Where the layer's changes are recorded.</param>
+    /// <summary>One layer taking part in a transform.</summary>
+    /// <param name="Layer">The layer the artwork came from, and the one a new layer goes above.</param>
+    /// <param name="Cel">The cel the artwork was lifted from, and the preview is drawn into.</param>
+    /// <param name="Session">Where the preview's changes are recorded, so they can be undone.</param>
     /// <param name="Pixels">The artwork as it was lifted, row by row across the source.</param>
-    private sealed record Subject(RasterEditSession Session, PixelColor[] Pixels);
+    private sealed record Subject(RasterLayer Layer, Cel Cel, RasterEditSession Session, PixelColor[] Pixels);
 }

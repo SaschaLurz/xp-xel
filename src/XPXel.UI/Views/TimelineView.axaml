@@ -49,12 +49,18 @@
         <Border Classes="separator" />
 
         <StackPanel Orientation="Horizontal" Spacing="2">
-          <Button Classes="transport" Command="{Binding AddFrameCommand}" ToolTip.Tip="Add an empty frame">
-            <Path Classes="transportIcon" Data="M12 6 L12 18 M6 12 L18 12" />
-          </Button>
+          <!-- Duplicate comes first and is the one with the busy icon, because it is the one
+               almost every new frame wants: drawing the next pose from the last one is how
+               hand-drawn animation is actually made. The empty frame sits beside it with an
+               outline icon that says "blank", since picking the wrong one of two near-identical
+               plus signs is how a background gets left behind on frame one. -->
           <Button Classes="transport" Command="{Binding DuplicateFrameCommand}"
-                  ToolTip.Tip="Duplicate this frame — the usual way to draw the next one">
+                  ToolTip.Tip="New frame from this one — copies every layer's drawing. The usual way to draw the next pose">
             <Path Classes="transportIcon" Data="M4 4 L14 4 L14 14 L4 14 Z M8 8 L20 8 L20 20 L8 20 Z" />
+          </Button>
+          <Button Classes="transport" Command="{Binding AddFrameCommand}"
+                  ToolTip.Tip="New empty frame — every layer starts blank on it. A background layer set to “same on every frame” still shows">
+            <Path Classes="transportIcon" Data="M5 5 L19 5 L19 19 L5 19 Z M12 9 L12 15 M9 12 L15 12" />
           </Button>
           <Button Classes="transport" Command="{Binding DeleteFrameCommand}" ToolTip.Tip="Delete this frame">
             <Path Classes="transportIcon" Data="M6 7 L18 7 M9 7 L9 19 M15 7 L15 19 M5 7 L19 7 L18 20 L6 20 Z" />
@@ -151,14 +157,26 @@
           <Border Classes="separator" />
           <TextBox Text="{Binding ActiveTag.Name, Mode=TwoWay}" Width="110"
                    ToolTip.Tip="The animation's name, which becomes its file name on export" />
+
+          <!-- An animation runs the whole timeline until the artist says otherwise, and only
+               then are the two range boxes worth anything - which is why they are disabled
+               rather than hidden. A range fixed when it was set is how an artist ends up
+               adding six frames and watching the first four play, with nothing on screen to
+               say why. -->
+          <CheckBox Content="All frames"
+                    IsChecked="{Binding ActiveTagCoversWholeTimeline, Mode=TwoWay}"
+                    VerticalAlignment="Center"
+                    ToolTip.Tip="Play every frame there is, including any added later. Turn it off to choose a range" />
           <NumericUpDown Value="{Binding ActiveTagFrom, Mode=TwoWay}"
-                         Minimum="0" Maximum="{Binding LastFrameIndex}"
+                         Minimum="1" Maximum="{Binding LastFrameNumber}"
                          FormatString="0" ShowButtonSpinner="False" Width="52"
-                         ToolTip.Tip="First frame, counting from zero" />
+                         IsEnabled="{Binding !ActiveTagCoversWholeTimeline}"
+                         ToolTip.Tip="First frame, the same number the timeline shows above it" />
           <NumericUpDown Value="{Binding ActiveTagTo, Mode=TwoWay}"
-                         Minimum="0" Maximum="{Binding LastFrameIndex}"
+                         Minimum="1" Maximum="{Binding LastFrameNumber}"
                          FormatString="0" ShowButtonSpinner="False" Width="52"
-                         ToolTip.Tip="Last frame, counting from zero" />
+                         IsEnabled="{Binding !ActiveTagCoversWholeTimeline}"
+                         ToolTip.Tip="Last frame, the same number the timeline shows above it" />
           <ComboBox ItemsSource="{x:Static vm:TimelineViewModel.LoopDirections}"
                     SelectedItem="{Binding ActiveTag.Direction, Mode=TwoWay}"
                     Width="106"
@@ -261,6 +279,40 @@
                                 Classes.selectedCel="{Binding IsSelected}"
                                 Classes.currentColumn="{Binding IsCurrentFrame}"
                                 Command="{Binding SelectCommand}">
+
+                          <!-- What you can do to one layer's drawing on one frame. The grid
+                               had no right-click at all, so a drawing made on the wrong frame
+                               could not be moved and a background could not be spread. Every
+                               command binds through the cell's Owner, because a menu is not
+                               part of the grid's visual tree and cannot look the panel up. -->
+                          <Button.ContextMenu>
+                            <ContextMenu>
+                              <MenuItem Header="Cu_t Drawing"
+                                        Command="{Binding Owner.CutCelCommand}"
+                                        CommandParameter="{Binding}" />
+                              <MenuItem Header="_Copy Drawing"
+                                        Command="{Binding Owner.CopyCelCommand}"
+                                        CommandParameter="{Binding}" />
+                              <MenuItem Header="_Paste Drawing"
+                                        Command="{Binding Owner.PasteCelCommand}"
+                                        CommandParameter="{Binding}" />
+                              <MenuItem Header="C_lear Drawing"
+                                        Command="{Binding Owner.ClearCelCommand}"
+                                        CommandParameter="{Binding}" />
+                              <Separator />
+                              <MenuItem Header="Copy to All _Frames"
+                                        Command="{Binding Owner.CopyCelToAllFramesCommand}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip.Tip="Put this drawing on every frame of this layer, as separate copies" />
+                              <MenuItem Header="_Same on Every Frame"
+                                        ToggleType="CheckBox"
+                                        IsChecked="{Binding IsContinuous, Mode=OneWay}"
+                                        Command="{Binding Owner.ToggleCelContinuousCommand}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip.Tip="One drawing shared by the whole timeline, including frames added later. This is what a background wants" />
+                            </ContextMenu>
+                          </Button.ContextMenu>
+
                           <!-- A filled block means this layer has a drawing on this frame; an
                                outline means it is empty and shows whatever is beneath. -->
                           <Border Width="14" Height="14"

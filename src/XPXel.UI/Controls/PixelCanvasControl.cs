@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -243,7 +244,31 @@ public sealed class PixelCanvasControl : Control, IDisposable
     /// The size of a crop handle in screen pixels, matched to the distance at which the tool
     /// treats a press as grabbing one.
     /// </summary>
-    private const double CropHandleSize = CropTool.GripScreenDistance;
+    /// <summary>
+    /// How big the eight resize handles are drawn on both the crop frame and the transform
+    /// box, in screen pixels.
+    /// </summary>
+    /// <remarks>
+    /// A little larger than the distance a press has to land within, so that every handle is
+    /// comfortably visible at the point it becomes grabbable rather than a moment afterwards.
+    /// </remarks>
+    private const double CropHandleSize = 7.0;
+
+    /// <summary>
+    /// How big the move handle in the middle of a transform box is drawn, in screen pixels.
+    /// </summary>
+    /// <remarks>
+    /// Larger than the resize handles, because it is the one an artist reaches for most and
+    /// the one that has to stay findable on a sprite only a few pixels across.
+    /// </remarks>
+    private const double TransformCenterHandleSize = 11.0;
+
+    /// <summary>
+    /// How many layers a stroke would reach, or <see langword="null"/> when it has to be
+    /// worked out again. See <see cref="CountEditableMarkedLayers"/>.
+    /// </summary>
+    private int? _markedLayerCount;
+
 
     /// <summary>
     /// How near the marching ants the pointer must come, in screen pixels, before a press
@@ -880,6 +905,17 @@ public sealed class PixelCanvasControl : Control, IDisposable
             return;
         }
 
+        // Enter means "done" everywhere else on the canvas — it places a transform, a paste and
+        // a crop — so with nothing waiting for an answer it finishes the one thing that is
+        // still outstanding: the marks. Anything else would make the key mean nothing at all
+        // half the time, which is worse than it meaning one small thing consistently.
+        if (e.Key == Key.Enter && _observedWorkspace is { Selection: { IsEmpty: false } } marked)
+        {
+            marked.History.Execute(new SetSelectionCommand(marked, marked.Selection, null, "Deselect"));
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Space)
         {
             SetSpacePanArmed(true);
@@ -1036,7 +1072,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         int dx = now.X - _boxGrabPoint.X;
         int dy = now.Y - _boxGrabPoint.Y;
 
-        if (_draggingBoxGrip == TransformGrip.Inside)
+        if (_draggingBoxGrip is TransformGrip.Inside or TransformGrip.Center)
         {
             box.DragEdges(start.Left + dx, start.Top + dy, start.Right + dx, start.Bottom + dy);
             return;
@@ -1053,13 +1089,23 @@ public sealed class PixelCanvasControl : Control, IDisposable
     }
 
     /// <summary>
-    /// Holds a corner drag to the box's original proportions while Shift is down.
+    /// Holds a corner drag to the box's original proportions, unless Shift is down.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Locked by default, and Shift lets go.</b> A sprite pulled out of shape by half a
+    /// pixel of pointer drift is a mistake nobody makes on purpose, and it is not obvious from
+    /// looking at the result — so the safe answer is the one that costs no keystroke, and
+    /// squashing something deliberately is the one that asks for a modifier. That is the
+    /// opposite of the convention in photo editors, and it is the right way round here because
+    /// pixel art is scaled in whole multiples far more often than it is reshaped.
+    /// </para>
+    /// <para>
     /// Only corners, because an edge drag has one axis and nothing to be proportional to. The
     /// larger of the two scales wins, so the box follows whichever way the pointer has moved
     /// further, and each axis keeps its own sign so that dragging a corner right across the box
     /// still mirrors the artwork.
+    /// </para>
     /// </remarks>
     private (int Left, int Top, int Right, int Bottom) ConstrainProportions(
         ImageRect start, int left, int top, int right, int bottom)
@@ -1067,7 +1113,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         bool corner = (_draggingBoxGrip & (TransformGrip.Left | TransformGrip.Right)) != 0
             && (_draggingBoxGrip & (TransformGrip.Top | TransformGrip.Bottom)) != 0;
 
-        if (!corner || !_modifiers.HasFlag(KeyModifiers.Shift) || start.Width <= 0 || start.Height <= 0)
+        if (!corner || _modifiers.HasFlag(KeyModifiers.Shift) || start.Width <= 0 || start.Height <= 0)
         {
             return (left, top, right, bottom);
         }
@@ -1458,7 +1504,9 @@ public sealed class PixelCanvasControl : Control, IDisposable
         if (_isDraggingBox)
         {
             _boxGrip = _draggingBoxGrip;
-            return _draggingBoxGrip == TransformGrip.Inside ? CanvasGrab.BoxBody : CanvasGrab.BoxEdge;
+            return _draggingBoxGrip is TransformGrip.Inside or TransformGrip.Center
+                ? CanvasGrab.BoxBody
+                : CanvasGrab.BoxEdge;
         }
 
         // A crop frame being dragged keeps the arrow of the edge it took hold of, so the
@@ -1485,12 +1533,12 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             _boxGrip = box.HitTest(
                 _transform.ToImagePoint(point),
-                GetGripTolerance(CropTool.GripScreenDistance));
+                GetGripTolerance(FreeTransform.GripScreenDistance));
 
             return _boxGrip switch
             {
                 TransformGrip.None => CanvasGrab.None,
-                TransformGrip.Inside => CanvasGrab.BoxBody,
+                TransformGrip.Inside or TransformGrip.Center => CanvasGrab.BoxBody,
                 _ => CanvasGrab.BoxEdge,
             };
         }
@@ -1709,7 +1757,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         {
             TransformGrip grip = box.HitTest(
                 _transform.ToImagePoint(position),
-                GetGripTolerance(CropTool.GripScreenDistance));
+                GetGripTolerance(FreeTransform.GripScreenDistance));
 
             if (grip == TransformGrip.None)
             {
@@ -1995,6 +2043,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
     private void OnDocumentChanged(object? sender, DocumentChangedEventArgs e)
     {
+        // A layer added, removed, hidden or locked changes how many a stroke would reach, and
+        // none of those raise anything on the workspace itself.
+        if (e.Kind is DocumentChangeKind.Structure or DocumentChangeKind.Properties)
+        {
+            _markedLayerCount = null;
+        }
+
         if (_renderTarget is null)
         {
             return;
@@ -2112,6 +2167,43 @@ public sealed class PixelCanvasControl : Control, IDisposable
             context.FillRectangle(dark, handleBox.Inflate(1));
             context.FillRectangle(bright, handleBox);
         }
+
+        DrawTransformCenterHandle(context, rect, dark, bright);
+    }
+
+    /// <summary>
+    /// Draws the handle in the middle of a transform box: the place to take hold of the
+    /// artwork itself.
+    /// </summary>
+    /// <remarks>
+    /// It is drawn as a four-way arrow rather than as a ninth square, so that it cannot be
+    /// mistaken for something that resizes. On a box too small to hold it the arrow is dropped
+    /// and only the square remains — the grip is still there and still outranks the edges, but
+    /// a glyph squeezed into six pixels would read as noise over the artwork.
+    /// </remarks>
+    private static void DrawTransformCenterHandle(DrawingContext context, Rect rect, IBrush dark, IBrush bright)
+    {
+        Point centre = rect.Center;
+
+        Rect body = new(
+            centre.X - (TransformCenterHandleSize / 2.0),
+            centre.Y - (TransformCenterHandleSize / 2.0),
+            TransformCenterHandleSize,
+            TransformCenterHandleSize);
+
+        context.FillRectangle(dark, body.Inflate(1));
+        context.FillRectangle(bright, body);
+
+        if (rect.Width < TransformCenterHandleSize * 3 || rect.Height < TransformCenterHandleSize * 3)
+        {
+            return;
+        }
+
+        Pen arms = new(dark, 1.5) { LineCap = PenLineCap.Round };
+        double reach = TransformCenterHandleSize / 2.0 - 1.5;
+
+        context.DrawLine(arms, new Point(centre.X - reach, centre.Y), new Point(centre.X + reach, centre.Y));
+        context.DrawLine(arms, new Point(centre.X, centre.Y - reach), new Point(centre.X, centre.Y + reach));
     }
 
     /// <summary>
@@ -2334,6 +2426,134 @@ public sealed class PixelCanvasControl : Control, IDisposable
         DrawOutlinedRect(context, _transform.GetPixelRect(new ImageRect(pixel, new ImageSize(1, 1))), dark, bright);
 
         DrawColorSwatch(context, dark, bright);
+        DrawMarkedLayerBadge(context);
+    }
+
+    /// <summary>
+    /// Draws the badge that says a stroke is about to land on more than one layer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it exists.</b> Marking several rows in the layers panel now changes what drawing
+    /// does as well as what Delete and Ctrl+T do, and a stroke arriving on four layers at once
+    /// because three rows were still highlighted from ten minutes ago is the kind of surprise
+    /// that is only noticed much later. The badge is the smallest honest warning: it says how
+    /// many layers, and it says it where the artist is already looking.
+    /// </para>
+    /// <para>
+    /// <b>Why it is not annoying.</b> It appears only when there is genuinely more than one
+    /// layer to write to, it sits up and to the left so it never covers the pixel being aimed
+    /// at — the colour dot has the right-hand side — and it goes the instant the marked set
+    /// comes back down to one. It is drawn on the canvas rather than baked into the mouse
+    /// cursor so that it can carry a number without a cursor bitmap per count.
+    /// </para>
+    /// </remarks>
+    private void DrawMarkedLayerBadge(DrawingContext context)
+    {
+        if (_pointerPosition is not { } position || CountEditableMarkedLayers() is not (> 1 and int count))
+        {
+            return;
+        }
+
+        FormattedText label = new(
+            count.ToString(CultureInfo.CurrentCulture),
+            CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            Typeface.Default,
+            9.0,
+            Brushes.White);
+
+        // Well up and to the left of the pointer, which is the corner nothing else uses, and
+        // far enough out that it never sits over the pixel being aimed at.
+        Point anchor = new(position.X - 30, position.Y - 26);
+
+        // Two offset sheets, drawn twice: a dark stroke underneath and a light one on top, the
+        // same way every other mark on this canvas is drawn. That is what makes it readable
+        // over black artwork and white artwork alike, and it is why there is no filled chip
+        // behind it — a solid black box covers the artwork it is sitting on.
+        Pen shadow = new(Brushes.Black, 3.0) { LineJoin = PenLineJoin.Round };
+        Pen sheets = new(Brushes.White, 1.0) { LineJoin = PenLineJoin.Round };
+
+        Rect back = new(anchor.X, anchor.Y, 6, 6);
+        Rect front = new(anchor.X + 2, anchor.Y + 2, 6, 6);
+
+        context.DrawRectangle(null, shadow, back);
+        context.DrawRectangle(null, shadow, front);
+        context.DrawRectangle(null, sheets, back);
+        context.DrawRectangle(null, sheets, front);
+
+        // The count gets the same treatment: drawn in black a hair off-centre in four
+        // directions, then in white on top, which outlines it without a background.
+        Point text = new(anchor.X + 11, anchor.Y - 1);
+
+        FormattedText outline = new(
+            count.ToString(CultureInfo.CurrentCulture),
+            CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            Typeface.Default,
+            9.0,
+            Brushes.Black);
+
+        foreach ((double dx, double dy) in LabelOutlineOffsets)
+        {
+            context.DrawText(outline, new Point(text.X + dx, text.Y + dy));
+        }
+
+        context.DrawText(label, text);
+    }
+
+    /// <summary>
+    /// The four directions the badge's number is shadowed in, so it reads on any artwork.
+    /// </summary>
+    private static readonly (double X, double Y)[] LabelOutlineOffsets =
+        [(-1, 0), (1, 0), (0, -1), (0, 1)];
+
+    /// <summary>
+    /// How many layers a stroke would currently be written to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule <see cref="ToolContext.BeginRasterEdit"/> follows, so the badge counts
+    /// exactly what the next stroke would touch: marked raster layers that are neither locked
+    /// nor hidden.
+    /// </para>
+    /// <para>
+    /// Cached, because this is consulted on every pointer sample to decide whether the badge
+    /// has to be repainted — and walking the layer tree, allocating a list, sixty times a
+    /// second for an answer that changes when somebody clicks a row is exactly the kind of
+    /// waste that makes a paint program feel heavy. Anything that could change it clears the
+    /// cache; see <see cref="InvalidateMarkedLayerCount"/>.
+    /// </para>
+    /// </remarks>
+    private int CountEditableMarkedLayers()
+    {
+        if (_markedLayerCount is { } cached)
+        {
+            return cached;
+        }
+
+        int count = 0;
+
+        if (_observedWorkspace is { CanEditActiveLayer: true } workspace)
+        {
+            foreach (LayerNode leaf in workspace.GetSelectedLeaves())
+            {
+                if (leaf is RasterLayer { IsLocked: false } layer && layer.IsEffectivelyVisible)
+                {
+                    count++;
+                }
+            }
+        }
+
+        _markedLayerCount = count;
+        return count;
+    }
+
+    /// <summary>Forgets the cached count, so the next ask works it out again.</summary>
+    private void InvalidateMarkedLayerCount()
+    {
+        _markedLayerCount = null;
+        InvalidateVisual();
     }
 
     /// <summary>
@@ -2391,6 +2611,19 @@ public sealed class PixelCanvasControl : Control, IDisposable
     private bool IsPaintingColorDot =>
         ShowColorSwatch && _presentation.ShowsColorSwatch && _dotCursor is null;
 
+    /// <summary>
+    /// Gets a value indicating whether anything drawn beside the pointer has to be repainted
+    /// on every pointer sample rather than only when the pointer changes pixel.
+    /// </summary>
+    /// <remarks>
+    /// Anything that follows the <em>pointer</em> rather than the pixel grid belongs here. Both
+    /// the colour dot and the marked-layer badge do, and repainting them only on a change of
+    /// pixel makes them look as though they are being dragged along behind the cursor on a
+    /// piece of elastic — most visible at high zoom, where one pixel is a long way across the
+    /// screen and the pointer travels most of it before anything moves.
+    /// </remarks>
+    private bool IsPaintingBesideThePointer => IsPaintingColorDot || CountEditableMarkedLayers() > 1;
+
     /// <summary>Outlines the current selection, if there is one.</summary>
     /// <remarks>
     /// <para>
@@ -2412,21 +2645,15 @@ public sealed class PixelCanvasControl : Control, IDisposable
         }
 
         // A clip in the air is outlined by itself, and whatever was marked before it arrived is
-        // not drawn at all. Nothing else would say the pasted pixels are still in the artist's
-        // hand, and the old marquee is about to be replaced by this one anyway — showing it in
-        // the meantime points at the wrong pixels.
         // A transform of the artwork leaves the marquee where it was until the box is put
-        // down, so drawing it would put the ants around the space the artwork has just left.
+        // down, so drawing it would put the ants around the space the artwork has just left —
+        // and a paste's box has nothing to do with whatever happened to be marked before it
+        // arrived. Both draw their own box, so nothing is lost by staying quiet here.
         // A transform of the marquee itself is the exact opposite: there the ants are the thing
         // being changed, and they are already following the box.
-        if (_observedWorkspace?.ActiveFreeTransform is { Scope: FreeTransformScope.Pixels })
+        if (_observedWorkspace?.ActiveFreeTransform
+            is { Scope: FreeTransformScope.Pixels or FreeTransformScope.Clip })
         {
-            return;
-        }
-
-        if (_observedWorkspace?.ActiveTransform is { MovesTheSelection: false } floating)
-        {
-            DrawMarchingAnts(context, _transform.GetPixelRect(floating.Bounds), dark, bright);
             return;
         }
 
@@ -2613,6 +2840,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
             context.FillRectangle(dark, box.Inflate(1));
             context.FillRectangle(bright, box);
         }
+
+        // The same move handle the transform box has, for the same reason: on a small frame
+        // the eight resize handles leave nowhere to take hold of the frame itself.
+        DrawTransformCenterHandle(context, rect, dark, bright);
     }
 
     /// <summary>The eight points a crop frame can be taken hold of: four corners, four edges.</summary>
@@ -2693,6 +2924,7 @@ public sealed class PixelCanvasControl : Control, IDisposable
         }
 
         _observedWorkspace = workspace;
+        _markedLayerCount = null;
 
         if (_observedWorkspace is not null)
         {
@@ -2928,6 +3160,13 @@ public sealed class PixelCanvasControl : Control, IDisposable
                 ObserveTextEdit(_observedWorkspace?.ActiveTextEdit);
                 break;
 
+            // The badge beside the pointer counts these, so marking or unmarking a row has to
+            // repaint even though nothing about the artwork changed.
+            case nameof(DocumentWorkspace.SelectedLayers):
+            case nameof(DocumentWorkspace.ActiveLayer):
+                InvalidateMarkedLayerCount();
+                break;
+
             // Moving along the timeline changes every pixel on screen, and onion skinning
             // means the neighbouring frames change with it.
             case nameof(DocumentWorkspace.ActiveFrame):
@@ -3020,10 +3259,10 @@ public sealed class PixelCanvasControl : Control, IDisposable
 
         // The highlight follows the pointer, so it has to be repainted when the pointer moves
         // to a different pixel — and only then, or a canvas would repaint at the pointer's
-        // full sample rate while drawing changes nothing. The painted colour dot is the
-        // exception: it follows the pointer rather than the pixel grid, and repainting it only
-        // on a change of pixel is what makes it look as though it is dragged along behind.
-        if (previous != _hoveredPixel || IsPaintingColorDot)
+        // full sample rate while drawing changes nothing. Anything drawn beside the pointer is
+        // the exception: it follows the pointer rather than the pixel grid, and repainting it
+        // only on a change of pixel is what makes it look as though it is dragged along behind.
+        if (previous != _hoveredPixel || IsPaintingBesideThePointer)
         {
             InvalidateVisual();
         }

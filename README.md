@@ -32,19 +32,41 @@ from a single codebase.
   fades everything inside it. The whole panel is direct-manipulable: drop a layer on **+** to
   duplicate it, on the **folder** button to wrap it in a new folder, on **✕** to delete
   *that* layer, or onto a folder row to move it inside.
-- **Several layers at once.** `Ctrl`-click or `Shift`-click to mark a run of layers, and every
-  structural operation takes the lot: drag them onto the **folder** button to wrap them all in
+- **A background, in one click.** The layers panel's **background** button adds an opaque
+  white layer at the bottom that is the *same drawing on every frame* — including frames added
+  afterwards — so it never has to be maintained per frame. Any layer can be switched to that
+  behaviour from its right-click menu (**Same on Every Frame**), and a marker beside its name
+  says so. When you want copies that can then diverge instead, **Copy to All Frames** puts this
+  frame's drawing on every other one as independent copies.
+- **Copy a whole layer.** **Copy Layer** and **Paste Layer** in the layers panel take the layer
+  itself — its name, its opacity, its blend mode and every frame's drawing — and paste it into
+  this document or another one. Separate from `Ctrl` `C`, which is still about the pixels in
+  front of you; with nothing marked it now copies everything on the layer rather than refusing.
+- **Right-click any cell in the timeline** to cut, copy, paste or clear that one layer's
+  drawing on that one frame, spread it to every frame, or make the layer the same throughout.
+- **Several layers at once, and it means one thing.** `Ctrl`-click or `Shift`-click to mark a
+  run of layers, and *everything* takes the lot — drawing included. A stroke, a fill, a shape or
+  the eraser lands on every marked layer in one undo step, and a badge appears beside the
+  pointer counting them, so a line arriving on four layers is never a surprise. Every
+  structural operation takes the lot too: drag them onto the **folder** button to wrap them all in
   one folder, or onto a folder row to move them all inside, in one undo step and keeping the
   order they were stacked in. Deleting, duplicating, visibility, opacity and blend mode apply
   to every marked layer, and so do copy, cut and `Ctrl` `T` — copying several layers flattens
   what you can see across them into one clip.
-- **Tools**: pencil, brush, eraser, bucket fill (with tolerance, contiguous or global),
-  colour picker, line, rectangle, ellipse, text, and a rectangular marquee — each with its
-  own icon, its own cursor and a single-key shortcut shown beside the icon. Right-click the
-  canvas for a panel of just the settings the active tool actually uses.
-- **A brush that is not a pencil.** The pencil writes one exact colour into one exact pixel,
-  always. The brush adds a shape, a size, a soft edge and stroke stabilisation, with a live
-  preview of the tip in the Brush panel and its footprint outlined on the canvas as you move.
+- **Tools**: pen-xel, brush, eraser, bucket fill (with tolerance, contiguous or global),
+  colour picker, line, rectangle, ellipse, text, and three ways of marking pixels — each with
+  its own icon, its own cursor and a single-key shortcut shown beside the icon. Tools that do
+  the same job differently **share a toolbox square**: the pen-xel with the brush, the three
+  shapes together, the three marking tools together. Right-click a square with a folded corner
+  to pick another; every tool keeps its own key, so grouping costs nothing at the keyboard.
+  Right-click the *canvas* for a panel of just the settings the active tool actually uses, with
+  the size slider at the top of it, because that is the one you opened the menu to change.
+- **Every tool keeps its own size.** Set the eraser to twenty and the pen-xel is still one
+  pixel when you go back to it.
+- **A brush that is not a pen-xel.** The pen-xel writes one exact colour into one exact pixel,
+  always — it only ever draws pixels, which is how it got the name. The brush adds a shape, a
+  size, a soft edge and stroke stabilisation, with a live preview of the tip in the Brush panel
+  and its footprint outlined on the canvas as you move.
 - **Editable text, as a text field.** Click with the text tool and type on the canvas, inside
   a dashed frame that says you are typing rather than drawing. Drag across the glyphs to select
   characters, hold `Shift` with the arrow keys to extend the range, `Ctrl` `A` for all of it —
@@ -63,7 +85,11 @@ from a single codebase.
   unaffected.
 - **Named animations in one file.** Cut "idle", "walk" and "attack" out of one timeline as
   tagged frame ranges, each with its own loop direction including ping-pong. One `.xpxel` is
-  one character, and export gives you one clip per motion.
+  one character, and export gives you one clip per motion. Every document starts with one
+  animation already in it, the way it starts with one layer, and an animation runs **every
+  frame** — including the ones you add afterwards — until you untick **All frames** and pick a
+  range yourself. Frames are numbered from 1 everywhere, in the timeline and in the range
+  boxes alike.
 - **Export that a game engine reads.** A **sprite sheet** on a uniform grid with a `.json`
   sidecar — Unity slices it with Grid By Cell Size, and the JSON matches the Aseprite format
   that Godot, Phaser and most importers already understand. Also numbered **PNG frames**, an
@@ -72,22 +98,32 @@ from a single codebase.
   All, Deselect and Invert in the Select menu. `Esc` clears a selection, so does clicking the
   empty space beside the picture, and `Delete` or `Backspace` erases what is marked.
 - **Free transform.** `Ctrl` `T` puts a box with eight handles around what is marked — or
-  around everything on the marked layers when nothing is marked. Drag a handle to scale, hold
-  `Shift` to keep the proportions, drag one past its opposite edge to flip, and press `R` to
-  turn a quarter turn (`H` and `V` flip outright). Scaling is nearest-neighbour, so a doubled
-  sprite is made of four-pixel blocks in the palette it started with, and rotation is offered in
-  quarter turns only because no other angle survives a pixel grid. `Enter` applies the whole
-  episode as one undo step; `Escape` puts everything back. **Transform Selection**, on the
-  Select menu and the canvas menu, does the same to the marching ants alone and leaves the
-  artwork exactly where it is — for when the shape you marked is right but the size is not.
+  around everything on the marked layers when nothing is marked. Drag a handle to scale — the
+  proportions are held by default, and `Shift` lets go of them — drag one past its opposite edge
+  to flip, and press `R` to turn a quarter turn (`H` and `V` flip outright). The handles are
+  exactly the eight squares you can see, and there is a ninth in the middle for moving the
+  artwork itself, which always wins over the edges however small the sprite is. Scaling is
+  nearest-neighbour, so a doubled sprite is made of four-pixel blocks in the palette it started
+  with, and rotation is offered in quarter turns only because no other angle survives a pixel
+  grid. `Enter` applies the whole episode as one undo step and clears the marks; `Escape` puts
+  everything back. **Transform Selection**, on the Select menu and the canvas menu, does the
+  same to the marching ants alone and leaves the artwork exactly where it is — for when the
+  shape you marked is right but the size is not.
+- **A transform never costs you a drawing.** Apply one on top of artwork that is already there
+  and the result lands on a new layer above it, so nothing underneath is written over — and a
+  paste does the same, arriving on a layer of its own. Both are on by default and both are
+  switchable, from the gear button in the layers panel or from Settings ▸ Layers. Artwork
+  pushed over the canvas edge by a transform is kept as well, hidden rather than cut, exactly
+  as it is when a layer is dragged half off the side.
 - **Copy, cut and paste, in and out of the editor.** `Ctrl` `C` and `Ctrl` `X` take what is
   marked — the exact pixels, alpha and all, and the shape of a selection that is not a
   rectangle. What lands on the system clipboard is an ordinary image as well, so it pastes
   into a chat window or another editor. `Ctrl` `V` takes an XP-xel clip, an image copied from
   anywhere else, or **text**, which arrives as an editable text layer rather than as pixels.
-  Pasted artwork lands **floating**: drag it, nudge it with the arrow keys, place it with
-  `Enter`, or press `Esc` and it was never there. Something cut comes back where it was cut
-  from, which is what makes "cut, change layer, paste" mean what it looks like.
+  Pasted artwork lands **floating, inside a transform box**: drag it, pull a handle to resize
+  it, nudge it with the arrow keys, place it with `Enter`, or press `Esc` and it was never
+  there. Something cut comes back where it was cut from, which is what makes "cut, change
+  layer, paste" mean what it looks like.
 - **Undo and redo** for every edit, with a stroke, a shape or a whole episode of typing each
   counting as one step.
 - **Canvas**: nearest-neighbour zoom to 64×, hold **Space** to grab and drag the image, a
@@ -108,10 +144,12 @@ from a single codebase.
   into the four-way arrow as it crosses the edge, whichever tool is in hand, so a mark can be
   made and moved without a trip back to the toolbox. With nothing marked, `V` moves the whole
   layer as it always has.
-- **Nothing falls off the edge.** Move a layer with `V` and whatever leaves the canvas is kept,
-  hidden rather than cut, exactly as a shape dragged half off a slide stays on the slide. Drag it
-  back, grow the canvas, or open the crop tool — which shows you what is out there — and it
-  returns.
+- **Nothing is ever destroyed by moving it.** Move a layer, drag marked pixels, or apply a
+  transform, and whatever leaves the canvas is kept — hidden rather than cut, exactly as a shape
+  dragged half off a slide stays on the slide. Drag it back, grow the canvas, or open the crop
+  tool, which shows you what is out there. **The only things that delete pixels are the eraser
+  and the commands that say so**: `Delete`, `Backspace`, Cut, and the canvas menu's *Delete
+  marked pixels*.
 - **Selections that are not boxes.** The pixel tool (`K`) marks pixels one at a time, however far
   apart, and the wand (`W`) marks a whole area of one colour. `Shift` adds and `Ctrl` takes away
   on every selection tool, the marching ants trace the actual edge rather than a bounding box, and
@@ -175,7 +213,8 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 
 | Action | Input |
 | --- | --- |
-| Pencil / brush / eraser | `Q` / `B` / `E` |
+| Pen-xel / brush / eraser | `Q` / `B` / `E` |
+| Reach another tool in the same square | Right-click the square — the folded corner marks one |
 | Bucket fill / colour picker | `G` / `I` |
 | Line / rectangle / ellipse | `L` / `R` / `O` |
 | Text / rectangular marquee | `T` / `M` |
@@ -183,22 +222,25 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Add to a selection / take away from it | Hold `Shift` / hold `Ctrl`, on any selection tool |
 | Mark everything on a layer | `Ctrl`-click its preview in the layers panel |
 | Move what you have marked | Drag its edge, or press inside it and drag |
+| Move the artwork inside a transform box | Drag the handle in its middle, or anywhere else inside it |
 | Scale, flip or turn what is marked | `Ctrl` `T`, then drag the handles; `Enter` applies, `Escape` cancels |
 | Transform the marked layers instead | `Ctrl` `T` with nothing marked on the canvas |
-| Keep the proportions while scaling | Hold `Shift` on a corner handle |
+| Let go of the proportions while scaling | Hold `Shift` on a corner handle — they are held otherwise |
 | Turn a quarter turn / flip, mid-transform | `R` (`Shift` `R` the other way) / `H` and `V` |
 | Reshape the marks without moving the artwork | Select → Transform Selection, or the canvas menu |
 | Copy / cut / paste what you have marked | `Ctrl` `C` / `Ctrl` `X` / `Ctrl` `V` |
+| Resize something pasted before placing it | Drag a handle of the box it arrives in |
 | Place or abandon something pasted | `Enter` / `Esc` |
-| Erase what you have marked | `Delete` or `Backspace` |
-| Clear the selection | `Esc`, or click beside the picture, or `Ctrl` `D` |
+| Erase what you have marked | `Delete`, `Backspace`, or the canvas menu |
+| Clear the selection | `Enter`, `Esc`, a click beside the picture, or `Ctrl` `D` |
 | Move a whole layer | `V`, then drag, with nothing marked |
+| Draw on several layers at once | Mark them in the layers panel; a badge by the pointer counts them |
 | Crop | `C`, drag the frame's handles, then `Enter` — the pointer shows which way each edge moves |
 | Draw | Left mouse button |
 | Open the active tool's settings | Right-click the canvas |
 | Pan the canvas | Hold `Space` and drag, or middle mouse button drag |
 | Zoom | Mouse wheel, or `Ctrl` `+` / `Ctrl` `-` |
-| Actual size / fit to window | `Ctrl` `0` / `Ctrl` `1` |
+| Fit to window / actual size | `Ctrl` `0` / `Ctrl` `1` |
 | Undo / redo | `Ctrl` `Z` / `Ctrl` `Y` |
 | Swap the primary and secondary colours | `X` |
 | Pick a palette colour | `1`–`9` and `0` for the first ten swatches |
@@ -213,6 +255,8 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Draw a perfectly straight run | Hold `Shift` while drawing; let go and press it again to turn a corner |
 | Change tool without letting go | Press the new tool's key mid-stroke |
 | Move the selected pixels | Select → Move Selected Pixels, then drag or use the arrow keys |
+| Change any setting there is | The **Settings** button at the right-hand end of the menu bar |
+| Change what happens to a layer when artwork lands on it | The gear button in the layers panel, or Settings ▸ Layers |
 | Show or hide the pixel grid | The **Grid** box on the options bar, or the View menu |
 | Lay the checkerboard over the artwork | The **On art** box on the options bar, or the View menu |
 | Change how far one zoom step travels | The **Zoom speed** slider on the options bar |
@@ -234,6 +278,13 @@ dotnet publish src/XPXel.Browser -c Release -o out/browser
 | Move a layer into an existing folder | Drag it onto the folder's row |
 | Delete the layer you are dragging | Drag it onto the **✕** button |
 | Label a layer or folder with a colour | Right-click it |
+| Put a white background behind everything | The **background** button in the layers panel |
+| Make any layer the same on every frame | Right-click it → **Same on Every Frame** |
+| Spread this frame's drawing to all frames | Right-click the layer or the timeline cell → **Copy to All Frames** |
+| Copy a whole layer, artwork and all | Right-click it → **Copy Layer**, then **Paste Layer** |
+| Do something to one drawing on one frame | Right-click its cell in the timeline |
+| Merge layers into one | Mark them, right-click, **Merge Layers** — every frame, exactly as they look |
+| Delete one layer or every marked one | Right-click it and choose **Delete**, or use the bin button |
 
 Panels are moved by dragging their title bar. Drop one on an edge of another panel to dock
 it there, on the middle to tab it together, or anywhere outside the window to float it.

@@ -108,6 +108,15 @@ internal sealed class LayerManifest
     /// <summary>Whether the layer rejects edits.</summary>
     public bool IsLocked { get; set; }
 
+    /// <summary>
+    /// Whether the layer holds one drawing shared by every frame.
+    /// </summary>
+    /// <remarks>
+    /// Absent from files written before continuous layers existed, and false is the right
+    /// reading of that: those documents genuinely do have a drawing per frame.
+    /// </remarks>
+    public bool IsContinuous { get; set; }
+
     /// <summary>The layer's opacity, 0 to 1.</summary>
     public double Opacity { get; set; } = 1.0;
 
@@ -215,6 +224,16 @@ internal sealed class TagManifest
 
     /// <summary>The tag's bar colour as <c>#RRGGBBAA</c>, or <see langword="null"/> for none.</summary>
     public string? Color { get; set; }
+
+    /// <summary>
+    /// Whether the animation follows the whole timeline rather than the range stored above.
+    /// </summary>
+    /// <remarks>
+    /// Absent from files written before animations could follow the timeline, and false is the
+    /// right reading of that: those ranges were chosen by hand, and quietly widening them on
+    /// open would change what an old project exports.
+    /// </remarks>
+    public bool CoversWholeTimeline { get; set; }
 }
 
 /// <summary>The pixel content of one layer on one frame.</summary>

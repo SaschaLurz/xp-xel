@@ -111,7 +111,44 @@ public sealed class LayerCompositor
         // Start from transparent: layers composite onto whatever is already there, so stale
         // content from a previous pass would show through where nothing is drawn.
         target.FillRect(area.Translate(-origin.X, -origin.Y), PixelColor.Transparent);
-        ComposeGroup(document.Root, document, frame, target, origin, area, depth: 0);
+        ComposeGroup(document.Root.Children, document, frame, target, origin, area, depth: 0);
+    }
+
+    /// <summary>
+    /// Flattens a chosen set of layers, ignoring everything else in the document.
+    /// </summary>
+    /// <param name="document">The document the layers belong to.</param>
+    /// <param name="frame">The frame to composite.</param>
+    /// <param name="layers">
+    /// The layers to flatten, bottom-most first. Folders are flattened along with their
+    /// contents; anything hidden or fully transparent contributes nothing, exactly as it
+    /// contributes nothing to the picture on screen.
+    /// </param>
+    /// <param name="target">The canvas-sized buffer to write into.</param>
+    /// <remarks>
+    /// This is what merging layers is made of. It has to be the same code the canvas uses, or
+    /// merging would produce a picture subtly unlike the one the artist was looking at when
+    /// they asked for it — every blend mode and every opacity has to land identically.
+    /// </remarks>
+    public void ComposeLayers(
+        PixelDocument document,
+        Frame frame,
+        IEnumerable<LayerNode> layers,
+        PixelBuffer target)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(layers);
+        ArgumentNullException.ThrowIfNull(target);
+
+        ImageRect area = document.Bounds.Intersect(target.Bounds);
+        if (area.IsEmpty)
+        {
+            return;
+        }
+
+        target.FillRect(area, PixelColor.Transparent);
+        ComposeGroup(layers, document, frame, target, ImagePoint.Origin, area, depth: 0);
     }
 
     /// <summary>
@@ -131,7 +168,7 @@ public sealed class LayerCompositor
     }
 
     private void ComposeGroup(
-        GroupLayer group,
+        IEnumerable<LayerNode> children,
         PixelDocument document,
         Frame frame,
         PixelBuffer target,
@@ -140,7 +177,7 @@ public sealed class LayerCompositor
         int depth)
     {
         // Children are stored bottom-most first, so a forward walk is already back-to-front.
-        foreach (LayerNode child in group.Children)
+        foreach (LayerNode child in children)
         {
             if (!child.IsVisible || child.Opacity <= 0.0)
             {
@@ -174,7 +211,7 @@ public sealed class LayerCompositor
                 {
                     PixelBuffer scratch = RentScratch(depth, target.Size);
                     scratch.FillRect(region.Translate(-origin.X, -origin.Y), PixelColor.Transparent);
-                    ComposeGroup(nested, document, frame, scratch, origin, region, depth + 1);
+                    ComposeGroup(nested.Children, document, frame, scratch, origin, region, depth + 1);
 
                     // The scratch buffer shares the target's size and position, so it composites
                     // back with the same origin.

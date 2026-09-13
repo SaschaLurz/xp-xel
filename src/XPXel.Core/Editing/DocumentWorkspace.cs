@@ -39,10 +39,19 @@ public sealed class DocumentWorkspace : ObservableModel
     /// <summary>Opens a workspace over a document.</summary>
     /// <param name="document">The document being edited.</param>
     /// <param name="filePath">Where the document was loaded from, if anywhere.</param>
-    public DocumentWorkspace(PixelDocument document, string? filePath = null)
+    /// <param name="layerSettings">
+    /// How layers behave when artwork is placed on them, shared across every open document. A
+    /// workspace built without one gets its own copy at the defaults, which is what the tests
+    /// and any head-less use want.
+    /// </param>
+    public DocumentWorkspace(
+        PixelDocument document,
+        string? filePath = null,
+        LayerSettings? layerSettings = null)
     {
         ArgumentNullException.ThrowIfNull(document);
 
+        LayerSettings = layerSettings ?? new LayerSettings();
         Document = document;
         History = new DocumentHistory();
         _filePath = filePath;
@@ -55,12 +64,24 @@ public sealed class DocumentWorkspace : ObservableModel
             : null;
 
         History.Changed += OnHistoryChanged;
+
+        // Anything that adds or removes a layer or a frame can pull the one being worked on
+        // out from under this workspace - an undo above all, which runs a command backwards
+        // without telling anybody what it took away. Watching for it here means no caller has
+        // to remember; see EnsureValidTargets for what goes wrong when nobody does.
+        Document.Changed += OnDocumentChanged;
     }
 
     private int _previousFrameIndex;
 
     /// <summary>The document being edited.</summary>
     public PixelDocument Document { get; }
+
+    /// <summary>
+    /// How layers behave when artwork is placed on them: whether a transform or a paste that
+    /// would land on existing pixels is given a layer of its own instead.
+    /// </summary>
+    public LayerSettings LayerSettings { get; }
 
     /// <summary>The undo history for this document.</summary>
     public DocumentHistory History { get; }
@@ -341,25 +362,32 @@ public sealed class DocumentWorkspace : ObservableModel
     /// one of them can be undone.
     /// </para>
     /// <para>
-    /// <b>It lands floating rather than stamped.</b> Where a paste should go is a question only
-    /// the artist can answer, so it arrives already picked up: drag it, nudge it with the arrow
-    /// keys, place it with Enter, or press Escape and it was never there. Where it starts is
-    /// <see cref="PixelClip.GetPasteOrigin"/>'s decision — back where it was cut from when that
-    /// still fits, and the middle of the canvas otherwise.
+    /// <b>It lands floating rather than stamped, and inside a transform box.</b> Where a paste
+    /// should go — and how big it should be — is a question only the artist can answer, so it
+    /// arrives already picked up, with the eight handles up: drag it, resize it, nudge it with
+    /// the arrow keys, place it with Enter, or press Escape and it was never there. Where it
+    /// starts is <see cref="PixelClip.GetPasteOrigin"/>'s decision — back where it was cut from
+    /// when that still fits, and the middle of the canvas otherwise.
     /// </para>
     /// </remarks>
-    public bool BeginPaste(PixelClip clip)
+    /// <param name="fromOutside">
+    /// Whether the pixels came from another program, which is what decides whether they are
+    /// given a layer of their own.
+    /// </param>
+    public bool BeginPaste(PixelClip clip, bool fromOutside = false)
     {
         ArgumentNullException.ThrowIfNull(clip);
 
         CommitTransform();
+        CommitFreeTransform();
 
-        if (SelectionTransform.BeginPaste(this, clip, clip.GetPasteOrigin(Document.Bounds)) is not { } transform)
+        if (FreeTransform.BeginPaste(
+            this, clip, clip.GetPasteOrigin(Document.Bounds), fromOutside) is not { } transform)
         {
             return false;
         }
 
-        ActiveTransform = transform;
+        ActiveFreeTransform = transform;
         return true;
     }
 
@@ -785,4 +813,45 @@ public sealed class DocumentWorkspace : ObservableModel
     }
 
     private void OnHistoryChanged(object? sender, EventArgs e) => OnPropertyChanged(nameof(HasUnsavedChanges));
+
+    private void OnDocumentChanged(object? sender, DocumentChangedEventArgs e)
+    {
+        if (e?.Kind == DocumentChangeKind.Structure)
+        {
+            EnsureValidTargets();
+        }
+    }
+
+    /// <summary>
+    /// Puts the active frame, the active layer and the marked set back onto things the
+    /// document still contains.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is not optional.</b> A frame or layer that has been removed leaves this
+    /// workspace holding an object the document has never heard of, and every cel lookup after
+    /// that quietly returns nothing: the canvas goes blank, the layer previews empty
+    /// themselves, and no error is raised anywhere. Undo is the usual way in, because it takes
+    /// something away without any of the code that asked for the change being involved.
+    /// </para>
+    /// <para>
+    /// It runs off the document's own change event rather than being called by each command,
+    /// so a command added later cannot forget it.
+    /// </para>
+    /// </remarks>
+    public void EnsureValidTargets()
+    {
+        EnsureValidFrame();
+
+        if (_activeLayer is { } layer && Document.FindLayer(layer.Id) != layer)
+        {
+            // The top-most remaining layer, which is what a new document starts on and the
+            // least surprising place to land after the one being used has gone.
+            ActiveLayer = Document.Root.Children.Count > 0 ? Document.Root.Children[^1] : null;
+        }
+
+        // Re-applying the marked set drops anything that is no longer part of the document and
+        // falls back to the active layer when that empties it.
+        SetSelectedLayers(_selectedLayers);
+    }
 }

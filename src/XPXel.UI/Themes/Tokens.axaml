@@ -30,6 +30,10 @@
       <SolidColorBrush x:Key="XpAccentBrush" Color="#FF2D6CDF" />
       <SolidColorBrush x:Key="XpAccentForegroundBrush" Color="#FFFFFFFF" />
 
+      <!-- For the handful of controls that destroy work. Kept well clear of the accent, so
+           "this does something" and "this undoes something you made" never look alike. -->
+      <SolidColorBrush x:Key="XpDangerBrush" Color="#FFC02A2A" />
+
       <!-- A mid grey behind the canvas: dark enough that white artwork reads clearly,
            light enough that black artwork does too. -->
       <SolidColorBrush x:Key="XpCanvasBackgroundBrush" Color="#FF9A9A9A" />
@@ -72,6 +76,7 @@
       <SolidColorBrush x:Key="XpSubtleForegroundBrush" Color="#FF9A9A9A" />
       <SolidColorBrush x:Key="XpAccentBrush" Color="#FF4E8EF7" />
       <SolidColorBrush x:Key="XpAccentForegroundBrush" Color="#FF10141C" />
+      <SolidColorBrush x:Key="XpDangerBrush" Color="#FFF2777A" />
 
       <SolidColorBrush x:Key="XpCanvasBackgroundBrush" Color="#FF303032" />
       <SolidColorBrush x:Key="XpCanvasBorderBrush" Color="#FF808080" />
